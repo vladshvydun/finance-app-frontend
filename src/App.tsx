@@ -28,6 +28,9 @@ function App() {
   const [editAmount, setEditAmount] = useState('')
   const [editCategory, setEditCategory] = useState('')
   const [editAccount, setEditAccount] = useState('')
+  const [savingId, setSavingId] = useState<number | null>(null)
+  const [inlineErrors, setInlineErrors] = useState<Record<number, string>>({})
+  const [deletingId, setDeletingId] = useState<number | null>(null)
 
 
   useEffect(()=>{
@@ -76,19 +79,58 @@ function App() {
   setEditAmount(String(tr.amount))
   setEditCategory(tr.category)
   setEditAccount(tr.account)
+  setInlineErrors(prev => {
+    const copy = { ...prev }
+    delete copy[tr.id]
+    return copy
+  })
   }
 
   const saveEdit = async (id: number) => {
-    await fetch(`http://localhost:3000/transactions/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        amount: Number(editAmount),
-        category: editCategory,
-        account: editAccount
+    const num = Number(editAmount)
+    if (Number.isNaN(num)) return
+
+    // Optimistic update: keep previous state for rollback
+    const prev = transactions.slice()
+    const updated = transactions.map(t =>
+      t.id === id ? { ...t, amount: num, category: editCategory, account: editAccount } : t
+    )
+    setTransactions(updated)
+    setSavingId(id)
+
+    try {
+      const res = await fetch(`http://localhost:3000/transactions/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: num, category: editCategory, account: editAccount })
       })
-    })
-    setEditingId(null)
+
+      if (!res.ok) {
+        // rollback on error, set inline error and show alert
+        const text = await res.text()
+        setTransactions(prev)
+        const message = `Не вдалося зберегти: ${text || res.status}`
+        setInlineErrors(prevErr => ({ ...prevErr, [id]: message }))
+        alert(message)
+        return
+      }
+
+      // success — clear editing state and any inline error
+      setInlineErrors(prevErr => {
+        const copy = { ...prevErr }
+        delete copy[id]
+        return copy
+      })
+      setEditingId(null)
+    } catch (err) {
+      setTransactions(prev)
+      const message = `Помилка мережі при збереженні`
+      setInlineErrors(prevErr => ({ ...prevErr, [id]: message }))
+      alert(message)
+      console.error('Save edit error', err)
+    } finally {
+      setSavingId(null)
+    }
   }
 
 
@@ -210,10 +252,8 @@ function App() {
               <li
                 key={tr.id}
                 className={`transaction-row ${
-                  tr.type === 'income'
-                    ? 'transaction-income'
-                    : 'transaction-expense'
-                }`}
+                  tr.type === 'income' ? 'transaction-income' : 'transaction-expense'
+                } ${editingId === tr.id ? 'transaction-row-edit' : ''}`}
               >
                 <div className="col date">
                   {new Date(tr.date).toLocaleDateString()}
@@ -252,9 +292,33 @@ function App() {
                     </div>
 
                     <div className="col actions">
-                      <button onClick={() => saveEdit(tr.id)}>✔</button>
-                      <button onClick={() => setEditingId(null)}>✖</button>
+                      <button
+                        onClick={() => saveEdit(tr.id)}
+                        disabled={savingId === tr.id}
+                        aria-label="Зберегти"
+                      >
+                        {savingId === tr.id ? '...' : <i className="fa-solid fa-check"></i>}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingId(null)
+                          setInlineErrors(prev => {
+                            const copy = { ...prev }
+                            delete copy[tr.id]
+                            return copy
+                          })
+                        }}
+                        disabled={savingId === tr.id}
+                        aria-label="Відмінити"
+                      >
+                        <i className="fa-solid fa-xmark"></i>
+                      </button>
                     </div>
+                    {inlineErrors[tr.id] && (
+                      <div className="inline-error" style={{ color: 'red', marginTop: 6 }}>
+                        {inlineErrors[tr.id]}
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
@@ -264,7 +328,47 @@ function App() {
                       {tr.type === 'income' ? '+' : '-'}
                       {Number(tr.amount).toLocaleString()} ₴
 
-                      <button onClick={() => startEdit(tr)}>✏️</button>
+                      <button onClick={() => startEdit(tr)} aria-label="Редагувати">
+                        <i className="fa-solid fa-pencil"></i>
+                      </button>
+
+                      <button
+                        onClick={async () => {
+                          const ok = window.confirm('Підтвердити видалення транзакції?')
+                          if (!ok) return
+
+                          // optimistic remove
+                          const prev = transactions.slice()
+                          setTransactions(transactions.filter(t => t.id !== tr.id))
+                          setDeletingId(tr.id)
+
+                          try {
+                            const res = await fetch(`http://localhost:3000/transactions/${tr.id}`, {
+                              method: 'DELETE'
+                            })
+
+                            if (!res.ok) {
+                              setTransactions(prev)
+                              const text = await res.text()
+                              const message = `Не вдалося видалити: ${text || res.status}`
+                              alert(message)
+                              setInlineErrors(prevErr => ({ ...prevErr, [tr.id]: message }))
+                            }
+                          } catch (err) {
+                            setTransactions(prev)
+                            const message = 'Помилка мережі при видаленні'
+                            alert(message)
+                            setInlineErrors(prevErr => ({ ...prevErr, [tr.id]: message }))
+                            console.error('Delete error', err)
+                          } finally {
+                            setDeletingId(null)
+                          }
+                        }}
+                        disabled={deletingId === tr.id}
+                        aria-label="Видалити"
+                      >
+                        {deletingId === tr.id ? '...' : <i className="fa-solid fa-xmark"></i>}
+                      </button>
                     </div>
                   </>
                 )}

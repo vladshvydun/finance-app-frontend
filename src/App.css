@@ -147,8 +147,17 @@ button:hover {
 .transactions-header {
   display: grid;
   grid-template-columns: 1.2fr 1.2fr 1.5fr 1fr;
-  padding: 10px;
-  align-items: center;
+}
+
+.transaction-row.transaction-row-edit {
+  grid-template-columns: 110px 1.6fr 1fr 120px auto;
+  background-color: rgba(255, 234, 210, 0.6);
+}
+
+.transaction-row.transaction-row-edit button {
+  padding: 5px;
+  margin-left: 5px;
+  background-color: unset;
 }
 
 .transaction-row {
@@ -193,11 +202,45 @@ button:hover {
   justify-content: flex-end;
 }
 
+.col.amount select {
+  width: 130px;
+}
+
+.col.amount input {
+  width: 100px;
+}
+
 .col.amount button {
   padding: 0;
   margin-left: 5px;
   background-color: transparent!important;
   font-size: 0.8em;
+  border:none;
+}
+
+.col.amount button:first-child {
+  margin-left: 10px;
+}
+
+.col.amount button:hover,
+.col.actions button:hover,
+.col.actions button {
+  border:none;
+}
+
+.col.amount i,
+.col.actions i {
+  color: #656363;
+  font-size: 1em;
+}
+
+col.amount .fa-xmark {
+  font-size: 1.2em;
+}
+
+.col.actions i {
+  margin: 0;
+  
 }
 
 @media (prefers-color-scheme: light) {
@@ -271,4 +314,27 @@ button:hover {
   border-radius: 5px;
   background-color: #ffe0e0;
   color: red;
+}
+
+/* Показувати кнопки редагування/видалення лише при наведенні */
+.transactions-list li .col.amount button {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(6px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  pointer-events: none;
+}
+
+.transactions-list li:hover .col.amount button {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+/* Зберегти видимість інтерфейсних кнопок під час редагування */
+.transaction-row .col.actions button {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
 }
