@@ -33,6 +33,98 @@ function App() {
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [filterAccount, setFilterAccount] = useState<string | null>(null)
   const [filterCategory, setFilterCategory] = useState<string | null>(null)
+  const [accountsList, setAccountsList] = useState<string[]>(['Рахунок 1', 'Рахунок 2'])
+  const [allCategoriesList, setAllCategoriesList] = useState<string[]>(['Інше', 'Реклама', 'Зарплата'])
+
+  const [showModal, setShowModal] = useState(false)
+  const [modalType, setModalType] = useState<'category'|'account'>('category')
+  const [newName, setNewName] = useState('')
+  const [newStartBalance, setNewStartBalance] = useState('0')
+
+  const openModal = (type: 'category'|'account') => {
+    setModalType(type)
+    setNewName('')
+    setNewStartBalance('0')
+    setShowModal(true)
+  }
+
+  const closeModal = () => setShowModal(false)
+
+  const createNew = async () => {
+    const name = newName.trim()
+    const start = Number(newStartBalance) || 0
+    if (!name) return alert('Введіть назву')
+
+    if (modalType === 'account') {
+      if (accountsList.includes(name)) return alert('Такий рахунок вже існує')
+
+      // optimistic update
+      const prevList = accountsList.slice()
+      const prevBalances = { ...accountsBalance }
+      setAccountsList(prev => [...prev, name])
+      setAccountsBalance(prev => ({ ...prev, [name]: (prev[name] || 0) + start }))
+      setFilterAccount(name)
+      setShowModal(false)
+
+      try {
+        const res = await fetch('http://localhost:3000/accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, start })
+        })
+
+        if (!res.ok) {
+          setAccountsList(prevList)
+          setAccountsBalance(prevBalances)
+          const text = await res.text()
+          alert(`Не вдалося створити рахунок: ${text || res.status}`)
+        } else {
+          const data = await res.json()
+          if (data.accounts) setAccountsList(data.accounts)
+        }
+      } catch (err) {
+        setAccountsList(prevList)
+        setAccountsBalance(prevBalances)
+        alert('Помилка мережі при створенні рахунку')
+        console.error(err)
+      }
+
+      return
+    }
+
+    // category
+    if (allCategoriesList.includes(name)) return alert('Така категорія вже існує')
+
+    const prevCatList = allCategoriesList.slice()
+    const prevCatBalances = { ...categoriesBalance }
+    setAllCategoriesList(prev => [...prev, name])
+    setCategoriesBalance(prev => ({ ...prev, [name]: (prev[name] || 0) + start }))
+    setFilterCategory(name)
+    setShowModal(false)
+
+    try {
+      const res = await fetch('http://localhost:3000/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, start })
+      })
+
+      if (!res.ok) {
+        setAllCategoriesList(prevCatList)
+        setCategoriesBalance(prevCatBalances)
+        const text = await res.text()
+        alert(`Не вдалося створити категорію: ${text || res.status}`)
+      } else {
+        const data = await res.json()
+        if (data.categories) setAllCategoriesList(data.categories)
+      }
+    } catch (err) {
+      setAllCategoriesList(prevCatList)
+      setCategoriesBalance(prevCatBalances)
+      alert('Помилка мережі при створенні категорії')
+      console.error(err)
+    }
+  }
 
 
   useEffect(()=>{
@@ -55,6 +147,16 @@ function App() {
         })
         setAccountsBalance(ab)
         setCategoriesBalance(cb)
+        // load persistent accounts/categories from backend
+        fetch('http://localhost:3000/accounts')
+          .then(r => r.json())
+          .then((a: string[]) => setAccountsList(a))
+          .catch(() => {})
+
+        fetch('http://localhost:3000/categories')
+          .then(r => r.json())
+          .then((c: string[]) => setAllCategoriesList(c))
+          .catch(() => {})
       })
 
     return ()=>{
@@ -136,21 +238,11 @@ function App() {
   }
 
 
-  const accounts = ['Рахунок 1', 'Рахунок 2']
-  .slice()
-  .sort((a, b) => a.localeCompare(b, 'uk'))
+  const accounts = accountsList.slice().sort((a, b) => a.localeCompare(b, 'uk'))
 
-  const allCategories = ['Інше', 'Реклама', 'Зарплата']
-  .slice()
-  .sort((a, b) => a.localeCompare(b, 'uk'))
+  const allCategories = allCategoriesList.slice().sort((a, b) => a.localeCompare(b, 'uk'))
 
-  const categoriesByType =
-   (activeTab === 'expense'
-    ? ['Інше', 'Реклама']
-    : ['Інше', 'Зарплата']
-  )
-    .slice()
-    .sort((a, b) => a.localeCompare(b, 'uk'))
+  const categoriesByType = allCategories.slice()
 
   const filteredTransactions = transactions
     .filter(t => (filterAccount ? t.account === filterAccount : true) && (filterCategory ? t.category === filterCategory : true))
@@ -174,7 +266,12 @@ function App() {
             </div>
 
             <div className="sidebar-block">
-              <h3>Мої рахунки</h3>
+              <h3>
+                Мої рахунки
+                <button className="add-btn" style={{ marginLeft: 8 }} onClick={() => openModal('account')} aria-label="Додати рахунок">
+                  <i className="fa-solid fa-plus"></i>
+                </button>
+              </h3>
               <ul className="list">
                 {accounts.map(a => (
                   <li key={a} className="list-item">
@@ -193,7 +290,12 @@ function App() {
             </div>
 
             <div className="sidebar-block">
-              <h3>Категорії</h3>
+              <h3>
+                Категорії
+                <button className="add-btn" style={{ marginLeft: 8 }} onClick={() => openModal('category')} aria-label="Додати категорію">
+                  <i className="fa-solid fa-plus"></i>
+                </button>
+              </h3>
               <ul className="list">
                 {allCategories.map(c => (
                   <li key={c} className="list-item">
@@ -413,6 +515,26 @@ function App() {
             ))}
           </ul>
         </div>
+
+        {showModal && (
+          <div className="modal-overlay" onClick={closeModal}>
+            <div className="modal" onClick={e => e.stopPropagation()}>
+              <h3>{modalType === 'category' ? 'Створити нову категорію' : 'Створити новий рахунок'}</h3>
+              <div className="form-row">
+                <label>Назва:</label>
+                <input value={newName} onChange={e => setNewName(e.target.value)} />
+              </div>
+              <div className="form-row">
+                <label>Стартовий баланс:</label>
+                <input type="number" value={newStartBalance} onChange={e => setNewStartBalance(e.target.value)} />
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                <button onClick={closeModal}>Скасувати</button>
+                <button onClick={createNew}>Створити</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       </div>
