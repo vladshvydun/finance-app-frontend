@@ -31,8 +31,8 @@ function App() {
   const [savingId, setSavingId] = useState<number | null>(null)
   const [inlineErrors, setInlineErrors] = useState<Record<number, string>>({})
   const [deletingId, setDeletingId] = useState<number | null>(null)
-  const [filterAccount, setFilterAccount] = useState<string | null>(null)
-  const [filterCategory, setFilterCategory] = useState<string | null>(null)
+  const [filterAccounts, setFilterAccounts] = useState<string[]>([])
+  const [filterCategories, setFilterCategories] = useState<string[]>([])
   const [accountsList, setAccountsList] = useState<string[]>(['Рахунок 1', 'Рахунок 2'])
   const [allCategoriesList, setAllCategoriesList] = useState<string[]>(['Інше', 'Реклама', 'Зарплата'])
 
@@ -40,6 +40,12 @@ function App() {
   const [modalType, setModalType] = useState<'category'|'account'>('category')
   const [newName, setNewName] = useState('')
   const [newStartBalance, setNewStartBalance] = useState('0')
+  const [showManageModal, setShowManageModal] = useState(false)
+  const [manageType, setManageType] = useState<'category'|'account'>('category')
+  const [manageList, setManageList] = useState<string[]>([])
+  const [manageEditing, setManageEditing] = useState<string | null>(null)
+  const [manageTempName, setManageTempName] = useState('')
+  const [manageTempStart, setManageTempStart] = useState('0')
 
   const openModal = (type: 'category'|'account') => {
     setModalType(type)
@@ -47,6 +53,15 @@ function App() {
     setNewStartBalance('0')
     setShowModal(true)
   }
+
+  const openManage = (type: 'category'|'account') => {
+    setManageType(type)
+    setManageList(type === 'account' ? accountsList.slice() : allCategoriesList.slice())
+    setManageEditing(null)
+    setShowManageModal(true)
+  }
+
+  const closeManage = () => setShowManageModal(false)
 
   const closeModal = () => setShowModal(false)
 
@@ -63,7 +78,7 @@ function App() {
       const prevBalances = { ...accountsBalance }
       setAccountsList(prev => [...prev, name])
       setAccountsBalance(prev => ({ ...prev, [name]: (prev[name] || 0) + start }))
-      setFilterAccount(name)
+      setFilterAccounts(prev => prev.includes(name) ? prev : [...prev, name])
       setShowModal(false)
 
       try {
@@ -99,7 +114,7 @@ function App() {
     const prevCatBalances = { ...categoriesBalance }
     setAllCategoriesList(prev => [...prev, name])
     setCategoriesBalance(prev => ({ ...prev, [name]: (prev[name] || 0) + start }))
-    setFilterCategory(name)
+    setFilterCategories(prev => prev.includes(name) ? prev : [...prev, name])
     setShowModal(false)
 
     try {
@@ -122,6 +137,123 @@ function App() {
       setAllCategoriesList(prevCatList)
       setCategoriesBalance(prevCatBalances)
       alert('Помилка мережі при створенні категорії')
+      console.error(err)
+    }
+  }
+
+  const startManageEdit = (item: string) => {
+    setManageEditing(item)
+    setManageTempName(item)
+    const startVal = manageType === 'account' ? (accountsBalance[item] || 0) : (categoriesBalance[item] || 0)
+    setManageTempStart(String(startVal))
+  }
+
+  const cancelManageEdit = () => {
+    setManageEditing(null)
+    setManageTempName('')
+    setManageTempStart('0')
+  }
+
+  const saveManageEdit = async (oldName: string) => {
+    const newNameVal = manageTempName.trim()
+    const start = Number(manageTempStart) || 0
+    if (!newNameVal) return alert('Введіть назву')
+
+    // optimistic
+    const prevList = manageList.slice()
+    const prevAccounts = accountsList.slice()
+    const prevCategories = allCategoriesList.slice()
+    const prevAccBal = { ...accountsBalance }
+    const prevCatBal = { ...categoriesBalance }
+
+    if (manageType === 'account') {
+      setAccountsList(prev => prev.map(p => p === oldName ? newNameVal : p))
+      setAccountsBalance(prev => ({ ...prev, [newNameVal]: (prev[newNameVal] || 0) + start, [oldName]: undefined }))
+    } else {
+      setAllCategoriesList(prev => prev.map(p => p === oldName ? newNameVal : p))
+      setCategoriesBalance(prev => ({ ...prev, [newNameVal]: (prev[newNameVal] || 0) + start, [oldName]: undefined }))
+    }
+    setManageEditing(null)
+
+    try {
+      const endpoint = manageType === 'account' ? `http://localhost:3000/accounts/${encodeURIComponent(oldName)}` : `http://localhost:3000/categories/${encodeURIComponent(oldName)}`
+      const res = await fetch(endpoint, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newName: newNameVal, start })
+      })
+
+      if (!res.ok) {
+        // rollback
+        setAccountsList(prevAccounts)
+        setAllCategoriesList(prevCategories)
+        setAccountsBalance(prevAccBal)
+        setCategoriesBalance(prevCatBal)
+        const text = await res.text()
+        alert(`Не вдалося зберегти: ${text || res.status}`)
+      } else {
+        const data = await res.json()
+        if (data.accounts) setAccountsList(data.accounts)
+        if (data.categories) setAllCategoriesList(data.categories)
+      }
+    } catch (err) {
+      setAccountsList(prevAccounts)
+      setAllCategoriesList(prevCategories)
+      setAccountsBalance(prevAccBal)
+      setCategoriesBalance(prevCatBal)
+      alert('Помилка мережі при збереженні')
+      console.error(err)
+    }
+  }
+
+  const deleteManageItem = async (name: string) => {
+    // compute related transactions count and total amount
+    const related = transactions.filter(t => (manageType === 'account' ? t.account === name : t.category === name))
+    const count = related.length
+    const sum = related.reduce((s, tr) => s + Number(tr.amount), 0)
+    const msg = `Ви впевнені що хочете видалити "${name}" разом з ${count} транзакц${count===1? 'ією':'іями'} на суму ${sum.toLocaleString()} ₴?`
+    const ok = window.confirm(msg)
+    if (!ok) return
+
+    const prevList = manageList.slice()
+    const prevAccounts = accountsList.slice()
+    const prevCategories = allCategoriesList.slice()
+    const prevAccBal = { ...accountsBalance }
+    const prevCatBal = { ...categoriesBalance }
+
+    // optimistic remove
+    if (manageType === 'account') {
+      setAccountsList(prev => prev.filter(p => p !== name))
+      setAccountsBalance(prev => { const copy = { ...prev }; delete copy[name]; return copy })
+      setFilterAccounts(prev => prev.filter(x => x !== name))
+    } else {
+      setAllCategoriesList(prev => prev.filter(p => p !== name))
+      setCategoriesBalance(prev => { const copy = { ...prev }; delete copy[name]; return copy })
+      setFilterCategories(prev => prev.filter(x => x !== name))
+    }
+
+    try {
+      const endpoint = manageType === 'account' ? `http://localhost:3000/accounts/${encodeURIComponent(name)}` : `http://localhost:3000/categories/${encodeURIComponent(name)}`
+      const res = await fetch(endpoint, { method: 'DELETE' })
+      if (!res.ok) {
+        // rollback
+        setAccountsList(prevAccounts)
+        setAllCategoriesList(prevCategories)
+        setAccountsBalance(prevAccBal)
+        setCategoriesBalance(prevCatBal)
+        const text = await res.text()
+        alert(`Не вдалося видалити: ${text || res.status}`)
+      } else {
+        const data = await res.json()
+        if (data.accounts) setAccountsList(data.accounts)
+        if (data.categories) setAllCategoriesList(data.categories)
+      }
+    } catch (err) {
+      setAccountsList(prevAccounts)
+      setAllCategoriesList(prevCategories)
+      setAccountsBalance(prevAccBal)
+      setCategoriesBalance(prevCatBal)
+      alert('Помилка мережі при видаленні')
       console.error(err)
     }
   }
@@ -245,7 +377,7 @@ function App() {
   const categoriesByType = allCategories.slice()
 
   const filteredTransactions = transactions
-    .filter(t => (filterAccount ? t.account === filterAccount : true) && (filterCategory ? t.category === filterCategory : true))
+    .filter(t => (filterAccounts.length ? filterAccounts.includes(t.account) : true) && (filterCategories.length ? filterCategories.includes(t.category) : true))
     .slice()
     .reverse()
 
@@ -266,48 +398,76 @@ function App() {
             </div>
 
             <div className="sidebar-block">
-              <h3>
-                Мої рахунки
-                <button className="add-btn" style={{ marginLeft: 8 }} onClick={() => openModal('account')} aria-label="Додати рахунок">
-                  <i className="fa-solid fa-plus"></i>
-                </button>
-              </h3>
+               <div className="sidebar-block-header">
+
+                  <h3>Мої рахунки</h3>
+
+                  <div className="sidebar-block-header-edit-buttons">
+                    <button className="add-btn" onClick={() => openModal('account')} aria-label="Додати рахунок">
+                      <i className="fa-solid fa-plus"></i>
+                    </button>
+                    <button className="manage-btn" onClick={() => openManage('account')} aria-label="Керувати рахунками">
+                      <i className="fa-regular fa-pen-to-square"></i>
+                    </button>
+                  </div>
+
+                </div>
+
               <ul className="list">
                 {accounts.map(a => (
-                  <li key={a} className="list-item">
+                  <li
+                    key={a}
+                    className="list-item"
+                    onClick={() => setFilterAccounts(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a])}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <div className="list-item-left">
                       <button
-                        onClick={() => setFilterAccount(prev => (prev === a ? null : a))}
+                        onClick={(e) => { e.stopPropagation(); setFilterAccounts(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a]); }}
                         style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
                       >
                         {a}:
                       </button>
                     </div>
-                    <div className="list-item-right">{accountsBalance[a] || 0} ₴</div>
+                    <div className="list-item-right" onClick={(e) => e.stopPropagation()}>{accountsBalance[a] || 0} ₴</div>
                   </li>
                 ))}
               </ul>
             </div>
 
             <div className="sidebar-block">
-              <h3>
-                Категорії
-                <button className="add-btn" style={{ marginLeft: 8 }} onClick={() => openModal('category')} aria-label="Додати категорію">
-                  <i className="fa-solid fa-plus"></i>
-                </button>
-              </h3>
+              <div className="sidebar-block-header">
+
+                  <h3>Категорії</h3>
+
+                  <div className="sidebar-block-header-edit-buttons">
+                    <button className="add-btn" onClick={() => openModal('category')} aria-label="Додати категорію">
+                      <i className="fa-solid fa-plus"></i>
+                    </button>
+                    <button className="manage-btn" onClick={() => openManage('category')} aria-label="Керувати категоріями">
+                      <i className="fa-regular fa-pen-to-square"></i>
+                    </button>
+                  </div>
+
+                </div>
+
               <ul className="list">
                 {allCategories.map(c => (
-                  <li key={c} className="list-item">
+                  <li
+                    key={c}
+                    className="list-item"
+                    onClick={() => setFilterCategories(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <div className="list-item-left">
                       <button
-                        onClick={() => setFilterCategory(prev => (prev === c ? null : c))}
+                        onClick={(e) => { e.stopPropagation(); setFilterCategories(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]); }}
                         style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
                       >
                         {c}:
                       </button>
                     </div>
-                    <div className="list-item-right">{categoriesBalance[c] || 0} ₴</div>
+                    <div className="list-item-right" onClick={(e) => e.stopPropagation()}>{categoriesBalance[c] || 0} ₴</div>
                   </li>
                 ))}
               </ul>
@@ -368,16 +528,16 @@ function App() {
 
         <div className="transactions">
           <div className="filter-bar">
-            {(filterAccount || filterCategory) ? (
+            {(filterAccounts.length || filterCategories.length) ? (
               <>
                 <strong>Фільтри:</strong>
-                {filterAccount && (
-                  <span className="filter-chip" onClick={() => setFilterAccount(null)}>Рахунок: {filterAccount} ✖</span>
-                )}
-                {filterCategory && (
-                  <span className="filter-chip" onClick={() => setFilterCategory(null)}>Категорія: {filterCategory} ✖</span>
-                )}
-                <button className="linkish" onClick={() => { setFilterAccount(null); setFilterCategory(null); }}>Очистити</button>
+                {filterAccounts.map(a => (
+                  <span key={"acc-"+a} className="filter-chip" onClick={() => setFilterAccounts(prev => prev.filter(x => x !== a))}>Рахунок: {a} ✖</span>
+                ))}
+                {filterCategories.map(c => (
+                  <span key={"cat-"+c} className="filter-chip" onClick={() => setFilterCategories(prev => prev.filter(x => x !== c))}>Категорія: {c} ✖</span>
+                ))}
+                <button className="linkish" onClick={() => { setFilterAccounts([]); setFilterCategories([]); }}>Очистити</button>
               </>
             ) : (
               <div className="filter-help">Клікніть на рахунок або категорію в сайдбарі або в рядку транзакції, щоб відфільтрувати</div>
@@ -531,6 +691,40 @@ function App() {
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
                 <button onClick={closeModal}>Скасувати</button>
                 <button onClick={createNew}>Створити</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {showManageModal && (
+          <div className="modal-overlay" onClick={closeManage}>
+            <div className="modal" onClick={e => e.stopPropagation()}>
+              <h3>{manageType === 'account' ? 'Керування рахунками' : 'Керування категоріями'}</h3>
+              <div className="manage-list">
+                { (manageType === 'account' ? accountsList : allCategoriesList).map(item => (
+                  <div key={item} className="manage-row">
+                    {manageEditing === item ? (
+                      <>
+                        <input value={manageTempName} onChange={e => setManageTempName(e.target.value)} />
+                        <input type="number" value={manageTempStart} onChange={e => setManageTempStart(e.target.value)} style={{ width: 110 }} />
+                        <div className="manage-actions">
+                          <button onClick={() => saveManageEdit(item)}><i className="fa-solid fa-check"></i></button>
+                          <button onClick={cancelManageEdit}><i className="fa-solid fa-xmark"></i></button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="manage-name">{item}</div>
+                        <div className="manage-actions">
+                          <button onClick={() => { setManageType(manageType); startManageEdit(item) }} aria-label="Редагувати"><i className="fa-solid fa-pen"></i></button>
+                          <button onClick={() => deleteManageItem(item)} aria-label="Видалити"><i className="fa-solid fa-trash"></i></button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                <button onClick={closeManage}>Закрити</button>
               </div>
             </div>
           </div>
