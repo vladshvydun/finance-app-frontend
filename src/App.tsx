@@ -31,6 +31,8 @@ function App() {
   const [savingId, setSavingId] = useState<number | null>(null)
   const [inlineErrors, setInlineErrors] = useState<Record<number, string>>({})
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [filterAccount, setFilterAccount] = useState<string | null>(null)
+  const [filterCategory, setFilterCategory] = useState<string | null>(null)
 
 
   useEffect(()=>{
@@ -150,6 +152,11 @@ function App() {
     .slice()
     .sort((a, b) => a.localeCompare(b, 'uk'))
 
+  const filteredTransactions = transactions
+    .filter(t => (filterAccount ? t.account === filterAccount : true) && (filterCategory ? t.category === filterCategory : true))
+    .slice()
+    .reverse()
+
   return (
     <div className="app-container">
       <div className="header">
@@ -169,11 +176,19 @@ function App() {
             <div className="sidebar-block">
               <h3>Мої рахунки</h3>
               <ul className="list">
-                {accounts.map(a=>
+                {accounts.map(a => (
                   <li key={a} className="list-item">
-                    <div className="list-item-left">{a}:</div><div className="list-item-right">{accountsBalance[a]||0} ₴</div>
+                    <div className="list-item-left">
+                      <button
+                        onClick={() => setFilterAccount(prev => (prev === a ? null : a))}
+                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                      >
+                        {a}:
+                      </button>
+                    </div>
+                    <div className="list-item-right">{accountsBalance[a] || 0} ₴</div>
                   </li>
-                )}
+                ))}
               </ul>
             </div>
 
@@ -182,10 +197,15 @@ function App() {
               <ul className="list">
                 {allCategories.map(c => (
                   <li key={c} className="list-item">
-                    <div className="list-item-left">{c}:</div>
-                    <div className="list-item-right">
-                      {categoriesBalance[c] || 0} ₴
+                    <div className="list-item-left">
+                      <button
+                        onClick={() => setFilterCategory(prev => (prev === c ? null : c))}
+                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                      >
+                        {c}:
+                      </button>
                     </div>
+                    <div className="list-item-right">{categoriesBalance[c] || 0} ₴</div>
                   </li>
                 ))}
               </ul>
@@ -245,10 +265,27 @@ function App() {
         </div>
 
         <div className="transactions">
+          <div className="filter-bar">
+            {(filterAccount || filterCategory) ? (
+              <>
+                <strong>Фільтри:</strong>
+                {filterAccount && (
+                  <span className="filter-chip" onClick={() => setFilterAccount(null)}>Рахунок: {filterAccount} ✖</span>
+                )}
+                {filterCategory && (
+                  <span className="filter-chip" onClick={() => setFilterCategory(null)}>Категорія: {filterCategory} ✖</span>
+                )}
+                <button className="linkish" onClick={() => { setFilterAccount(null); setFilterCategory(null); }}>Очистити</button>
+              </>
+            ) : (
+              <div className="filter-help">Клікніть на рахунок або категорію в сайдбарі або в рядку транзакції, щоб відфільтрувати</div>
+            )}
+          </div>
+
           <h3>Останні записи</h3>
 
           <ul className="transactions-list">
-            {transactions.slice().reverse().map(tr => (
+            {filteredTransactions.map(tr => (
               <li
                 key={tr.id}
                 className={`transaction-row ${

@@ -338,3 +338,23 @@ col.amount .fa-xmark {
   visibility: visible !important;
   pointer-events: auto !important;
 }
+
+.filter-chip {
+  display: inline-block;
+  background: #f0f0f0;
+  padding: 4px 8px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.filter-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.filter-help {
+  color: #666;
+  font-size: 0.9em;
+}
