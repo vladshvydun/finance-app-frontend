@@ -16,6 +16,12 @@ body {
       color: #000;
 }
 
+.tabs button {
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+}
+
 .app-container {
   background-color: #ececec;
   min-height: 100vh;
@@ -28,6 +34,7 @@ body {
 }
 
 .container {
+  max-width: 1100px;
   display: flex;
   flex-direction: row;
   flex-wrap: nowrap;
@@ -39,7 +46,7 @@ body {
 }
 
 .sidebar {
-  width: 300px;
+  width: 400px;
   gap: 30px;
 }
 
@@ -74,9 +81,6 @@ h3 {
   margin-bottom: 20px;
 }
 
-.tabs-header {
-  background-color: #EF852F;
-}
 .tabs {
   display: flex;
   justify-content: center;
@@ -86,25 +90,57 @@ h3 {
   background-color: #ffffff;
   border-radius: 5px;
   border: 5px solid;
-  border-color: #EF852F;
   min-width: 600px;
 }
+
+.styleExpense {
+  border-color: #EF852F;
+}
+
+.styleHeaderExpense {
+  background-color: #EF852F;
+}
+
+.styleHeaderExpense .active{
+  color: #EF852F;
+}
+
+.styleIncome {
+  border-color: #369518;
+}
+
+.styleHeaderIncome .active{
+  color: #369518;
+}
+
+.styleHeaderIncome {
+  background-color: #369518;
+}
+
+.styleTransfer {
+  border-color: #687c8d;
+}
+
+.styleHeaderTransfer {
+  background-color: #687c8d;
+}
+
+.styleHeaderTransfer .active {
+  color: #687c8d;
+}
+
 .tabs-content {
   display: flex;
   flex-direction: row;
   flex-wrap: nowrap;
   justify-content: flex-start;
   align-items: flex-start;
-  padding: 20px;
+  padding: 20px 20px 0 20px;
 }
 .tab-content-left-column {
   margin-right:30px;
 }
-.tabs button {
-  border-radius: 5px;
-  border: none;
-  cursor: pointer;
-}
+
 button:focus, button:focus-visible {
   outline: unset!important;
 }
@@ -114,7 +150,6 @@ button:hover {
 
 .tabs .active {
   background-color: #ffffff;
-  color: #EF852F;
   border-radius: 0;
 }
 
@@ -153,6 +188,10 @@ button:hover {
   color:rgba(0, 0, 0, 0.5);
 }
 
+.list-item button {
+  color: grey;
+}
+
 
 .transaction-form {
   display: flex;
@@ -163,7 +202,11 @@ button:hover {
 
 .transactions-header {
   display: grid;
-  grid-template-columns: 1.2fr 1.2fr 1.5fr 1fr;
+  grid-template-columns: 100px 1.3fr 1.3fr 0.9fr 0.7fr;
+  margin-top: 10px;
+  padding: 0 10px;
+  gap: 12px;
+  font-size: 14px;
 }
 
 .transaction-row.transaction-row-edit {
@@ -177,38 +220,16 @@ button:hover {
   background-color: unset;
 }
 
-.transaction-row {
+.edit-modal-buttons {
   display: flex;
+  justify-content: space-between;
   align-items: center;
+  padding: 0 20px 0 20px;
 }
 
-.transaction-row {
-  display: grid;
-  grid-template-columns: 110px 1fr 1fr 120px;
-  align-items: center;
-  gap: 12px;
-}
-
-
-.transactions-header {
-  font-weight: bold;
-  border-bottom: 2px solid #ddd;
-  background: #fafafa;
-}
-
-.transaction-row {
-  margin-bottom: 6px;
-  border-radius: 6px;
-}
-
-.transaction-income {
-  background-color: #e8fff0;
-  color: #1b7f3b;
-}
-
-.transaction-expense {
-  background-color: #ffecec;
-  color: #a10000;
+.edit-del-modal-buttons {
+  display: flex;
+  gap: 8px;
 }
 
 .col.amount {
@@ -225,6 +246,14 @@ button:hover {
 
 .col.amount input {
   width: 100px;
+}
+
+.amount-positive {
+  color: #00B28E;
+}
+
+.amount-negative {
+  color: #FF6333;
 }
 
 .col.amount button {
@@ -269,12 +298,21 @@ col.amount .fa-xmark {
 .form-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   margin-bottom: 15px;
+  width: 100%;
+  gap: 10px;
 }
 
 .form-row select,
-.summ-input {
+.summ-input,
+.date-input {
   margin-left:10px
+}
+
+.form-row label,
+.form-row select {
+  display: flex;
 }
 
 .form-row-summ {
@@ -297,19 +335,64 @@ col.amount .fa-xmark {
   width: 300px;
 }
 
-.form-row select, .summ-input {
+.comment-input {
+  width: 100%;
+}
+
+.form-row.comment-row {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.form-row.comment-row input {
+  width: 100%;
+  max-width: 500px;
+}
+
+.form-row select, .summ-input,
+.form-row input {
   background-color: #fff;
   color: #2b2b2b;
 }
 
-.add-button {
+.add-button,
+.cancel-button,
+.edit-modal-delete-button {
   padding: 8px 25px;
+  margin-bottom: 20px;
   border-radius: 5px;
-  background-color: #4CAF50;
-  color: white;
   border: none;
   cursor: pointer;
   width: fit-content;
+}
+
+.add-button {
+ background-color: #4CAF50;
+  color: white;
+}
+
+.add-button-expense {
+  background-color: #EF852F;
+}
+
+.add-button-income {
+  background-color: #369518;
+}
+
+.add-button-transfer {
+  background-color: #687c8d;
+}
+
+.cancel-button {
+  background-color: #ffffff;
+  color: #f44336;
+  border: 1px solid #f0b8b8!important;
+} 
+
+.edit-modal-delete-button {
+  background-color: rgb(232, 97, 8);
+  color: #ffffff;
 }
 
 .transactions-list {
@@ -317,20 +400,42 @@ col.amount .fa-xmark {
   padding: 0;
 }
 
-.transaction-income {
-  padding: 10px;
-  margin-bottom: 5px;
-  border-radius: 5px;
-  background-color: #e0ffe0;
-  color: green;
+.transaction-row {
+  display: grid;
+  grid-template-columns: 100px 1.8fr 1.8fr 1.3fr 1fr;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  background-color: #fafafa;
+  font-size: 14px;
 }
 
-.transaction-expense {
+.transaction-row .col {
+  max-width: 140px;
+  max-height: 85px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+}
+
+
+.transaction-row:hover {
+  background-color: #f7f7f7;
+}
+
+.transaction-income,
+.transaction-expense,
+.transaction-transfer {
   padding: 10px;
   margin-bottom: 5px;
   border-radius: 5px;
-  background-color: #ffe0e0;
-  color: red;
+  color: #000000;
+}
+
+.transaction-row .time {
+  opacity: 0.5;
+  font-size: 0.8em;
 }
 
 /* Показувати кнопки редагування/видалення лише при наведенні */

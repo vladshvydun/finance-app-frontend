@@ -7,17 +7,25 @@ export const socket = io('http://localhost:3000')
 type Transaction = {
   id: number
   amount: number
-  type: 'income' | 'expense'
+  type: 'income' | 'expense' | 'transfer'
   category: string
   account: string
+  from_account?: string | null
+  to_account?: string | null
   date: string
+  comment?: string
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'expense'|'income'>('expense')
+  const [activeTab, setActiveTab] = useState<'expense'|'income'|'transfer'>('expense')
   const [amount, setAmount] = useState('')
+  const todayStr = new Date().toISOString().slice(0,10)
+  const [date, setDate] = useState<string>(todayStr)
   const [category, setCategory] = useState('Інше')
   const [account, setAccount] = useState('Рахунок 1')
+  const [transferFrom, setTransferFrom] = useState('')
+  const [transferTo, setTransferTo] = useState('')
+  const [comment, setComment] = useState('')
 
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [accountsBalance, setAccountsBalance] = useState<Record<string,number>>({})
@@ -27,7 +35,13 @@ function App() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editAmount, setEditAmount] = useState('')
   const [editCategory, setEditCategory] = useState('')
+  const [editDate, setEditDate] = useState<string>('')
   const [editAccount, setEditAccount] = useState('')
+  const [editType, setEditType] = useState<'income'|'expense'|'transfer'>('expense')
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editTransferFrom, setEditTransferFrom] = useState<string>('')
+  const [editTransferTo, setEditTransferTo] = useState<string>('')
+  const [editComment, setEditComment] = useState('')
   const [savingId, setSavingId] = useState<number | null>(null)
   const [inlineErrors, setInlineErrors] = useState<Record<number, string>>({})
   const [deletingId, setDeletingId] = useState<number | null>(null)
@@ -42,7 +56,7 @@ function App() {
   const [newStartBalance, setNewStartBalance] = useState('0')
   const [showManageModal, setShowManageModal] = useState(false)
   const [manageType, setManageType] = useState<'category'|'account'>('category')
-  const [manageList, setManageList] = useState<string[]>([])
+  
   const [manageEditing, setManageEditing] = useState<string | null>(null)
   const [manageTempName, setManageTempName] = useState('')
   const [manageTempStart, setManageTempStart] = useState('0')
@@ -56,7 +70,6 @@ function App() {
 
   const openManage = (type: 'category'|'account') => {
     setManageType(type)
-    setManageList(type === 'account' ? accountsList.slice() : allCategoriesList.slice())
     setManageEditing(null)
     setShowManageModal(true)
   }
@@ -160,7 +173,6 @@ function App() {
     if (!newNameVal) return alert('Введіть назву')
 
     // optimistic
-    const prevList = manageList.slice()
     const prevAccounts = accountsList.slice()
     const prevCategories = allCategoriesList.slice()
     const prevAccBal = { ...accountsBalance }
@@ -168,10 +180,20 @@ function App() {
 
     if (manageType === 'account') {
       setAccountsList(prev => prev.map(p => p === oldName ? newNameVal : p))
-      setAccountsBalance(prev => ({ ...prev, [newNameVal]: (prev[newNameVal] || 0) + start, [oldName]: undefined }))
+      setAccountsBalance(prev => {
+        const copy = { ...prev }
+        copy[newNameVal] = (copy[newNameVal] || 0) + start
+        delete copy[oldName]
+        return copy
+      })
     } else {
       setAllCategoriesList(prev => prev.map(p => p === oldName ? newNameVal : p))
-      setCategoriesBalance(prev => ({ ...prev, [newNameVal]: (prev[newNameVal] || 0) + start, [oldName]: undefined }))
+      setCategoriesBalance(prev => {
+        const copy = { ...prev }
+        copy[newNameVal] = (copy[newNameVal] || 0) + start
+        delete copy[oldName]
+        return copy
+      })
     }
     setManageEditing(null)
 
@@ -208,14 +230,21 @@ function App() {
 
   const deleteManageItem = async (name: string) => {
     // compute related transactions count and total amount
-    const related = transactions.filter(t => (manageType === 'account' ? t.account === name : t.category === name))
+    const related = transactions.filter(t => {
+      if (manageType === 'account') {
+        if (t.type === 'transfer') {
+          return t.from_account === name || t.to_account === name || t.account === name
+        }
+        return t.account === name
+      }
+      return t.category === name
+    })
     const count = related.length
     const sum = related.reduce((s, tr) => s + Number(tr.amount), 0)
-    const msg = `Ви впевнені що хочете видалити "${name}" разом з ${count} транзакц${count===1? 'ією':'іями'} на суму ${sum.toLocaleString()} ₴?`
+    const msg = `Ви впевнені що хочете видалити "${name}" разом з ${count} транзакц${count===1? 'ією':'іями'} на суму ${formatMoney(sum)} ₴?`
     const ok = window.confirm(msg)
     if (!ok) return
 
-    const prevList = manageList.slice()
     const prevAccounts = accountsList.slice()
     const prevCategories = allCategoriesList.slice()
     const prevAccBal = { ...accountsBalance }
@@ -269,11 +298,18 @@ function App() {
       .then(r=>r.json())
       .then((t:Transaction[])=>{
         setTransactions(t)
-        const b = t.reduce((sum,tr)=> tr.type==='income'? sum+Number(tr.amount):sum-Number(tr.amount),0)
+        const b = t.reduce((sum,tr)=> tr.type==='income'? sum+Number(tr.amount): tr.type==='expense' ? sum-Number(tr.amount) : sum,0)
         setBalance(b)
         const ab:Record<string,number>={}
         const cb:Record<string,number>={}
         t.forEach(tr=>{
+          if (tr.type === 'transfer') {
+            const fromAcc = tr.from_account || tr.account
+            const toAcc = tr.to_account
+            if (fromAcc) ab[fromAcc] = (ab[fromAcc]||0) - Number(tr.amount)
+            if (toAcc) ab[toAcc] = (ab[toAcc]||0) + Number(tr.amount)
+            return
+          }
           ab[tr.account] = (ab[tr.account]||0) + (tr.type==='income'?Number(tr.amount):-Number(tr.amount))
           cb[tr.category] = (cb[tr.category]||0) + (tr.type==='income'?Number(tr.amount):-Number(tr.amount))
         })
@@ -299,15 +335,57 @@ function App() {
     }
   },[])
 
+  // ensure transfer selects default to available accounts
+  useEffect(() => {
+    if (accountsList.length > 0) {
+      setAccount(prev => accountsList.includes(prev) ? prev : accountsList[0])
+      setTransferFrom(prev => prev && accountsList.includes(prev) ? prev : accountsList[0])
+      setTransferTo(prev => prev && accountsList.includes(prev) ? prev : (accountsList[1] || accountsList[0]))
+    }
+  }, [accountsList])
+
   const addTransaction = async ()=>{
-    const num = Number(amount)
-    if(!num) return
+    const parsed = String(amount).replace(',', '.')
+    let num = parseFloat(parsed)
+    if (Number.isNaN(num) || num <= 0) return
+    num = Math.round(num * 100) / 100
     await fetch('http://localhost:3000/transactions',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({amount:num,type:activeTab,category,account})
+      body: JSON.stringify({amount: num, type:activeTab, category, account, date, comment})
     })
     setAmount('')
+    setDate(todayStr)
+    setComment('')
+  }
+
+  const addTransfer = async () => {
+    const parsed = String(amount).replace(',', '.')
+    let num = parseFloat(parsed)
+    if (Number.isNaN(num) || num <= 0) return alert('Введіть коректну суму')
+    num = Math.round(num * 100) / 100
+    if (!transferFrom || !transferTo) return alert('Оберіть рахунки')
+    if (transferFrom === transferTo) return alert('Оберіть різні рахунки')
+
+    try {
+      const res = await fetch('http://localhost:3000/transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: num, from: transferFrom, to: transferTo, date, comment })
+      })
+
+      if (!res.ok) {
+        const text = await res.text()
+        alert(`Помилка при виконанні переказу: ${text || res.status}`)
+      } else {
+        setAmount('')
+        setDate(todayStr)
+        setComment('')
+      }
+    } catch (err) {
+      alert('Помилка мережі при переказі')
+      console.error('Transfer error', err)
+    }
   }
 
   const startEdit = (tr: Transaction) => {
@@ -315,34 +393,76 @@ function App() {
   setEditAmount(String(tr.amount))
   setEditCategory(tr.category)
   setEditAccount(tr.account)
+  setEditComment(tr.comment || '')
+  // use local date parts to avoid timezone shift
+  try {
+    const d = new Date(tr.date)
+    const localDateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    setEditDate(localDateStr || todayStr)
+  } catch (e) {
+    setEditDate(todayStr)
+  }
+  if (tr.type === 'transfer') {
+    setEditType('transfer')
+    setEditTransferFrom(tr.from_account || tr.account || '')
+    setEditTransferTo(tr.to_account || '')
+    // Встановлюємо категорію 'Переказ' для переказу
+    setEditCategory('Переказ')
+    setEditAccount(tr.from_account || tr.account || '')
+  } else {
+    setEditType(tr.type)
+    // Встановлюємо дефолтні значення для переказу на випадок зміни типу
+    setEditTransferFrom(tr.account || accountsList[0] || '')
+    setEditTransferTo(accountsList.find(a => a !== tr.account) || accountsList[1] || accountsList[0] || '')
+    setEditAccount(tr.account)
+    setEditCategory(tr.category || allCategoriesList[0] || 'Інше')
+  }
   setInlineErrors(prev => {
     const copy = { ...prev }
     delete copy[tr.id]
     return copy
   })
+  setShowEditModal(true)
   }
 
   const saveEdit = async (id: number) => {
     const num = Number(editAmount)
     if (Number.isNaN(num)) return
+    if (editType === 'transfer') {
+      if (!editTransferFrom || !editTransferTo) return alert('Оберіть рахунки')
+      if (editTransferFrom === editTransferTo) return alert('Оберіть різні рахунки')
+    }
 
     // Optimistic update: keep previous state for rollback
     const prev = transactions.slice()
+    // optimistic update: update current row
     const updated = transactions.map(t =>
-      t.id === id ? { ...t, amount: num, category: editCategory, account: editAccount } : t
+      t.id === id ? {
+        ...t,
+        amount: num,
+        category: editType === 'transfer' ? 'Переказ' : editCategory,
+        account: editType === 'transfer' ? editTransferFrom : editAccount,
+        from_account: editType === 'transfer' ? editTransferFrom : t.from_account,
+        to_account: editType === 'transfer' ? editTransferTo : t.to_account,
+        date: editDate,
+        type: editType,
+        comment: editComment
+      } : t
     )
     setTransactions(updated)
     setSavingId(id)
 
     try {
+      const body = editType === 'transfer'
+        ? { amount: num, category: 'Переказ', account: editTransferFrom, from_account: editTransferFrom, to_account: editTransferTo, date: editDate, type: 'transfer', comment: editComment }
+        : { amount: num, category: editCategory, account: editAccount, date: editDate, type: editType, comment: editComment }
+
       const res = await fetch(`http://localhost:3000/transactions/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: num, category: editCategory, account: editAccount })
+        body: JSON.stringify(body)
       })
-
       if (!res.ok) {
-        // rollback on error, set inline error and show alert
         const text = await res.text()
         setTransactions(prev)
         const message = `Не вдалося зберегти: ${text || res.status}`
@@ -358,6 +478,7 @@ function App() {
         return copy
       })
       setEditingId(null)
+      setShowEditModal(false)
     } catch (err) {
       setTransactions(prev)
       const message = `Помилка мережі при збереженні`
@@ -369,6 +490,11 @@ function App() {
     }
   }
 
+  const closeEditModal = () => {
+    setShowEditModal(false)
+    setEditingId(null)
+  }
+
 
   const accounts = accountsList.slice().sort((a, b) => a.localeCompare(b, 'uk'))
 
@@ -377,9 +503,32 @@ function App() {
   const categoriesByType = allCategories.slice()
 
   const filteredTransactions = transactions
-    .filter(t => (filterAccounts.length ? filterAccounts.includes(t.account) : true) && (filterCategories.length ? filterCategories.includes(t.category) : true))
+    .filter(t => {
+      const accountMatch = filterAccounts.length
+        ? (t.type === 'transfer'
+          ? filterAccounts.some(a => a === t.from_account || a === t.to_account || a === t.account)
+          : filterAccounts.includes(t.account))
+        : true
+      const categoryMatch = filterCategories.length
+        ? (t.type === 'transfer' ? false : filterCategories.includes(t.category))
+        : true
+      return accountMatch && categoryMatch
+    })
     .slice()
     .reverse()
+
+  const formatMoney = (value: number) => {
+    const num = Math.round((Number(value) || 0) * 100) / 100
+    const sign = num < 0 ? '-' : ''
+    const abs = Math.abs(num)
+    const integerPart = Math.trunc(abs)
+    const frac = Math.round((abs - integerPart) * 100)
+    // insert space as thousands separator
+    const intStr = integerPart.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0')
+    if (frac === 0) return sign + intStr
+    const fracStr = String(frac).padStart(2, '0')
+    return sign + intStr + '.' + fracStr
+  }
 
   return (
     <div className="app-container">
@@ -394,7 +543,7 @@ function App() {
           <div className="left-column">
 
             <div className="sidebar-block">
-              <h3>Баланс: {balance.toLocaleString()} ₴</h3>
+              <h3>Баланс: {formatMoney(balance)} ₴</h3>
             </div>
 
             <div className="sidebar-block">
@@ -429,7 +578,7 @@ function App() {
                         {a}:
                       </button>
                     </div>
-                    <div className="list-item-right" onClick={(e) => e.stopPropagation()}>{accountsBalance[a] || 0} ₴</div>
+                    <div className="list-item-right" onClick={(e) => e.stopPropagation()}>{formatMoney(accountsBalance[a] || 0)} ₴</div>
                   </li>
                 ))}
               </ul>
@@ -467,7 +616,7 @@ function App() {
                         {c}:
                       </button>
                     </div>
-                    <div className="list-item-right" onClick={(e) => e.stopPropagation()}>{categoriesBalance[c] || 0} ₴</div>
+                    <div className="list-item-right" onClick={(e) => e.stopPropagation()}>{formatMoney(categoriesBalance[c] || 0)} ₴</div>
                   </li>
                 ))}
               </ul>
@@ -479,8 +628,8 @@ function App() {
 
         {/* Права колонка */}
         <div className="content">
-        <div className="tabs">
-          <div className="tabs-header">
+        <div className={`tabs ${activeTab === 'expense' ? 'styleExpense' : activeTab === 'income' ? 'styleIncome' : 'styleTransfer'}`}>
+          <div className={`tabs-header ${activeTab === 'expense' ? 'styleHeaderExpense' : activeTab === 'income' ? 'styleHeaderIncome' : 'styleHeaderTransfer'}`}>
             <button 
               className={activeTab==='expense'?'active':'inactive'}
               onClick={()=>setActiveTab('expense')}
@@ -489,39 +638,103 @@ function App() {
               className={activeTab==='income'?'active':'inactive'}
               onClick={()=>setActiveTab('income')}
             >Дохід</button>
+            <button
+              className={activeTab==='transfer'?'active':'inactive'}
+              onClick={()=>setActiveTab('transfer')}
+            >Переказ</button>
           </div>
 
           <div className="tabs-content">
-            <div className="tab-content-left-column">
-              <div className="transaction-form">
-                <div className="form-row">
-                  <label>Рахунок:</label>
-                  <select value={account} onChange={e=>setAccount(e.target.value)}>
-                    {accounts.map(a=><option key={a} value={a}>{a}</option>)}
-                  </select>
-                </div>
+            {activeTab !== 'transfer' ? (
+              <>
+                <div className="tab-content-left-column">
+                  <div className="transaction-form">
+                    <div className="form-row">
+                      <label>Рахунок:</label>
+                      <select value={account} onChange={e=>setAccount(e.target.value)}>
+                        {accounts.map(a=><option key={a} value={a}>{a}</option>)}
+                      </select>
+                    </div>
 
-                <div className="form-row">
-                  <label>Категорія:</label>
-                  <select value={category} onChange={e=>setCategory(e.target.value)}>
-                    {categoriesByType.map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                    <div className="form-row">
+                      <label>Категорія:</label>
+                      <select value={category} onChange={e=>setCategory(e.target.value)}>
+                        {categoriesByType.map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
 
+                    <div className="form-row">
+                      <input 
+                        className="comment-input"
+                        type="text" 
+                        value={comment} 
+                        onChange={e => setComment(e.target.value)} 
+                        placeholder='Коментар'
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-            <div className="tab-content-right-column">
-              <div className="form-row-summ">
-                <div className="form-row tabs-summ">
-                  <label>Сума:</label>
-                  <input className="summ-input" type="text" value={amount} onChange={e=>setAmount(e.target.value)}/>
+                <div className="tab-content-right-column">
+                  <div className="form-row-summ">
+                    <div className="form-row tabs-summ">
+                      <label>Сума:</label>
+                      <input className="summ-input" type="number" step="0.01" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)}/>
+                    </div>
+                    <div className="form-row">
+                      <label>Дата:</label>
+                      <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+                    </div>
+                    <button className={`add-button ${activeTab === 'expense' ? 'add-button-expense' : 'add-button-income'}`} onClick={addTransaction}>
+                      {activeTab === 'expense' ? 'Додати витрату' : 'Додати дохід'}
+                    </button>
+                  </div>
                 </div>
-                  
-                  <button className="add-button" onClick={addTransaction}>Додати</button>
+              </>
+            ) : (
+              // Transfer tab
+              <>
+                <div className="tab-content-left-column">
+                  <div className="transaction-form">
+                    <div className="form-row">
+                      <label>З рахунку:</label>
+                      <select value={transferFrom} onChange={e=>setTransferFrom(e.target.value)}>
+                        {accounts.map(a=><option key={"from-"+a} value={a}>{a}</option>)}
+                      </select>
+                    </div>
+                    <div className="form-row">
+                      <label>На рахунок:</label>
+                      <select value={transferTo} onChange={e=>setTransferTo(e.target.value)}>
+                        {accounts.map(a=><option key={"to-"+a} value={a}>{a}</option>)}
+                      </select>
+                    </div>
+                    <div className="form-row">
+                      <input 
+                        className="comment-input"
+                        type="text" 
+                        value={comment} 
+                        onChange={e => setComment(e.target.value)} 
+                        placeholder='Коментар'
+                      />
+                    </div>
+                  </div>
                 </div>
-            </div>
+                <div className="tab-content-right-column">
+                  <div className="form-row-summ">
+                    <div className="form-row tabs-summ">
+                      <label>Сума:</label>
+                      <input className="summ-input" type="number" step="0.01" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)}/>
+                    </div>
+                    <div className="form-row">
+                      <label>Дата:</label>
+                      <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+                    </div>
+                    <button className="add-button add-button-transfer" onClick={() => addTransfer()}>Додати переказ</button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
           
         </div>
@@ -546,133 +759,52 @@ function App() {
 
           <h3>Останні записи</h3>
 
+          <div className="transactions-header">
+            <div className="col date">Дата</div>
+            <div className="col account">Рахунок</div>
+            <div className="col category">Категорія</div>
+            <div className="col comment">Коментар</div>
+            <div className="col amount">Сума</div>
+          </div>
+
           <ul className="transactions-list">
-            {filteredTransactions.map(tr => (
-              <li
-                key={tr.id}
-                className={`transaction-row ${
-                  tr.type === 'income' ? 'transaction-income' : 'transaction-expense'
-                } ${editingId === tr.id ? 'transaction-row-edit' : ''}`}
-              >
-                <div className="col date">
-                  {new Date(tr.date).toLocaleDateString()}
-                </div>
+            {filteredTransactions.map(tr => {
+              const isTransfer = tr.type === 'transfer'
+              const fromAcc = tr.from_account || tr.account
+              const toAcc = tr.to_account || ''
 
-                {editingId === tr.id ? (
-                  <>
-                    <div className="col account">
-                      <select
-                        value={editAccount}
-                        onChange={e => setEditAccount(e.target.value)}
-                      >
-                        {accounts.map(a => (
-                          <option key={a} value={a}>{a}</option>
-                        ))}
-                      </select>
-                    </div>
+              return (
+                <li
+                  key={tr.id}
+                  className={`transaction-row ${tr.type === 'income' ? 'transaction-income' : tr.type === 'expense' ? 'transaction-expense' : 'transaction-transfer'}`}
+                  onClick={() => startEdit(tr)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="col date">
+                    <div>{new Date(tr.date).toLocaleDateString()}</div>
+                    <div className="time">{new Date(tr.date).toLocaleTimeString('uk', { hour: '2-digit', minute: '2-digit' })}</div>
+                  </div>
 
-                    <div className="col category">
-                      <select
-                        value={editCategory}
-                        onChange={e => setEditCategory(e.target.value)}
-                      >
-                        {allCategories.map(c => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                    </div>
+                  {isTransfer ? (
+                    <>
+                      <div className="col account">{fromAcc} → {toAcc}</div>
+                      <div className="col category">Переказ</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="col account">{tr.account}</div>
+                      <div className="col category">{tr.category}</div>
+                    </>
+                  )}
 
-                    <div className="col amount">
-                      <input
-                        type="number"
-                        value={editAmount}
-                        onChange={e => setEditAmount(e.target.value)}
-                      />
-                    </div>
+                  <div className="col comment">{tr.comment || ''}</div>
 
-                    <div className="col actions">
-                      <button
-                        onClick={() => saveEdit(tr.id)}
-                        disabled={savingId === tr.id}
-                        aria-label="Зберегти"
-                      >
-                        {savingId === tr.id ? '...' : <i className="fa-solid fa-check"></i>}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingId(null)
-                          setInlineErrors(prev => {
-                            const copy = { ...prev }
-                            delete copy[tr.id]
-                            return copy
-                          })
-                        }}
-                        disabled={savingId === tr.id}
-                        aria-label="Відмінити"
-                      >
-                        <i className="fa-solid fa-xmark"></i>
-                      </button>
-                    </div>
-                    {inlineErrors[tr.id] && (
-                      <div className="inline-error" style={{ color: 'red', marginTop: 6 }}>
-                        {inlineErrors[tr.id]}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <div className="col account">{tr.account}</div>
-                    <div className="col category">{tr.category}</div>
-                    <div className="col amount">
-                      {tr.type === 'income' ? '+' : '-'}
-                      {Number(tr.amount).toLocaleString()} ₴
-
-                      <button onClick={() => startEdit(tr)} aria-label="Редагувати">
-                        <i className="fa-solid fa-pencil"></i>
-                      </button>
-
-                      <button
-                        onClick={async () => {
-                          const ok = window.confirm('Підтвердити видалення транзакції?')
-                          if (!ok) return
-
-                          // optimistic remove
-                          const prev = transactions.slice()
-                          setTransactions(transactions.filter(t => t.id !== tr.id))
-                          setDeletingId(tr.id)
-
-                          try {
-                            const res = await fetch(`http://localhost:3000/transactions/${tr.id}`, {
-                              method: 'DELETE'
-                            })
-
-                            if (!res.ok) {
-                              setTransactions(prev)
-                              const text = await res.text()
-                              const message = `Не вдалося видалити: ${text || res.status}`
-                              alert(message)
-                              setInlineErrors(prevErr => ({ ...prevErr, [tr.id]: message }))
-                            }
-                          } catch (err) {
-                            setTransactions(prev)
-                            const message = 'Помилка мережі при видаленні'
-                            alert(message)
-                            setInlineErrors(prevErr => ({ ...prevErr, [tr.id]: message }))
-                            console.error('Delete error', err)
-                          } finally {
-                            setDeletingId(null)
-                          }
-                        }}
-                        disabled={deletingId === tr.id}
-                        aria-label="Видалити"
-                      >
-                        {deletingId === tr.id ? '...' : <i className="fa-solid fa-xmark"></i>}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </li>
-            ))}
+                  <div className={`col amount ${tr.type === 'income' ? 'amount-positive' : 'amount-negative'}`}>
+                    {isTransfer ? `-${formatMoney(Number(tr.amount))} ₴` : `${tr.type === 'income' ? '+' : '-'}${formatMoney(Number(tr.amount))} ₴`}
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         </div>
 
@@ -691,6 +823,124 @@ function App() {
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
                 <button onClick={closeModal}>Скасувати</button>
                 <button onClick={createNew}>Створити</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {showEditModal && (
+          <div className="modal-overlay" onClick={closeEditModal}>
+            <div className="edit-modal" onClick={e => e.stopPropagation()}>
+              <div className={`tabs ${editType === 'expense' ? 'styleExpense' : editType === 'income' ? 'styleIncome' : 'styleTransfer'}`}>
+                <div className={`tabs-header ${editType === 'expense' ? 'styleHeaderExpense' : editType === 'income' ? 'styleHeaderIncome' : 'styleHeaderTransfer'}`}>
+                  <button className={editType==='expense'?'active':'inactive'} onClick={()=>setEditType('expense')}>Витрати</button>
+                  <button className={editType==='income'?'active':'inactive'} onClick={()=>setEditType('income')}>Дохід</button>
+                  <button className={editType==='transfer'?'active':'inactive'} onClick={()=>setEditType('transfer')}>Переказ</button>
+                </div>
+                <div className="tabs-content">
+                  <div className="tab-content-left-column">
+                    <div className="transaction-form">
+                      {editType === 'transfer' ? (
+                        <>
+                          <div className="form-row">
+                            <label>З рахунку:</label>
+                            <select value={editTransferFrom} onChange={e=>setEditTransferFrom(e.target.value)}>
+                              {accounts.map(a=><option key={"from-"+a} value={a}>{a}</option>)}
+                            </select>
+                          </div>
+                          <div className="form-row">
+                            <label>На рахунок:</label>
+                            <select value={editTransferTo} onChange={e=>setEditTransferTo(e.target.value)}>
+                              {accounts.map(a=><option key={"to-"+a} value={a}>{a}</option>)}
+                            </select>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="form-row">
+                            <label>Рахунок:</label>
+                            <select value={editAccount} onChange={e=>setEditAccount(e.target.value)}>
+                              {accounts.map(a=><option key={a} value={a}>{a}</option>)}
+                            </select>
+                          </div>
+
+                          <div className="form-row">
+                            <label>Категорія:</label>
+                            <select value={editCategory} onChange={e=>setEditCategory(e.target.value)}>
+                              {categoriesByType.map(c => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div className="form-row comment-row">
+                      <label>Коментар:</label>
+                      <input 
+                        type="text" 
+                        value={editComment} 
+                        onChange={e => setEditComment(e.target.value)} 
+                        placeholder="Необов'язкове поле"
+                      />
+                    </div>
+                  </div>
+                  <div className="tab-content-right-column">
+                    <div className="form-row-summ">
+                      <div className="form-row tabs-summ">
+                        <label>Сума:</label>
+                        <input className="summ-input" type="number" step="0.01" inputMode="decimal" value={editAmount} onChange={e=>setEditAmount(e.target.value)}/>
+                      </div>
+                      <div className="form-row">
+                        <label>Дата:</label>
+                        <input className="date-input" type="date" value={editDate} onChange={e => setEditDate(e.target.value)} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className='edit-modal-buttons'>
+                  <button className="edit-modal-delete-button"
+                    onClick={async () => {
+                      if (!editingId) return
+                      const ok = window.confirm('Підтвердити видалення транзакції?')
+                      if (!ok) return
+
+                      // optimistic remove
+                      const prev = transactions.slice()
+                      setTransactions(transactions.filter(t => t.id !== editingId))
+                      setDeletingId(editingId)
+                      closeEditModal()
+
+                      try {
+                        const res = await fetch(`http://localhost:3000/transactions/${editingId}`, {
+                          method: 'DELETE'
+                        })
+
+                        if (!res.ok) {
+                          setTransactions(prev)
+                          const text = await res.text()
+                          const message = `Не вдалося видалити: ${text || res.status}`
+                          alert(message)
+                          setInlineErrors(prevErr => ({ ...prevErr, [editingId]: message }))
+                        }
+                      } catch (err) {
+                        setTransactions(prev)
+                        const message = 'Помилка мережі при видаленні'
+                        alert(message)
+                        setInlineErrors(prevErr => ({ ...prevErr, [editingId]: message }))
+                        console.error('Delete error', err)
+                      } finally {
+                        setDeletingId(null)
+                      }
+                    }}
+                    disabled={deletingId === editingId}
+                  >
+                    {deletingId === editingId ? '...' : 'Видалити платіж'}
+                  </button>
+                  <div className="edit-del-modal-buttons">
+                    <button className="cancel-button" onClick={closeEditModal}>Скасувати</button>
+                    <button className="add-button" onClick={() => editingId && saveEdit(editingId)}>Зберегти</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
