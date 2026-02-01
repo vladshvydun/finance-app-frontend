@@ -61,6 +61,12 @@ function App() {
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [filterAccounts, setFilterAccounts] = useState<string[]>([])
   const [filterCategories, setFilterCategories] = useState<string[]>([])
+  const [dateFilterType, setDateFilterType] = useState<string>('all')
+  const [customDateFrom, setCustomDateFrom] = useState('')
+  const [customDateTo, setCustomDateTo] = useState('')
+  const [showDatePicker, setShowDatePicker] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false)
   const [accountsList, setAccountsList] = useState<string[]>(['Рахунок 1', 'Рахунок 2'])
   const [allCategoriesList, setAllCategoriesList] = useState<string[]>(['Інше', 'Реклама', 'Зарплата'])
 
@@ -72,6 +78,10 @@ function App() {
   const [manageType, setManageType] = useState<'category'|'account'>('category')
   const [showBankIntegration, setShowBankIntegration] = useState(false)
   const [showAutoRules, setShowAutoRules] = useState(false)
+  const [showCategoriesManage, setShowCategoriesManage] = useState(false)
+  const [editingCategoryName, setEditingCategoryName] = useState<string | null>(null)
+  const [categoryNewName, setCategoryNewName] = useState('')
+  const [categoryParent, setCategoryParent] = useState('')
   
   const [manageEditing, setManageEditing] = useState<string | null>(null)
   const [manageTempName, setManageTempName] = useState('')
@@ -303,6 +313,121 @@ function App() {
     }
   }
 
+  // Функції для модального вікна категорій
+  const handleCreateCategory = async () => {
+    const name = categoryNewName.trim()
+    if (!name) return alert('Введіть назву категорії')
+    
+    // Формуємо повну назву з батьківською категорією
+    const fullName = categoryParent ? `${categoryParent}: ${name}` : name
+    if (allCategoriesList.includes(fullName)) return alert('Така категорія вже існує')
+
+    const prevCatList = allCategoriesList.slice()
+    setAllCategoriesList(prev => [...prev, fullName])
+    setCategoryNewName('')
+    setCategoryParent('')
+    setEditingCategoryName(null)
+
+    try {
+      const res = await fetch('http://localhost:3000/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: fullName, start: 0 })
+      })
+
+      if (!res.ok) {
+        setAllCategoriesList(prevCatList)
+        const text = await res.text()
+        alert(`Не вдалося створити категорію: ${text || res.status}`)
+      }
+    } catch (err) {
+      setAllCategoriesList(prevCatList)
+      alert('Помилка мережі при створенні категорії')
+      console.error(err)
+    }
+  }
+  const handleUpdateCategory = async (oldName: string) => {
+    const newNameVal = categoryNewName.trim()
+    if (!newNameVal) return alert('Введіть назву')
+    
+    // Формуємо повну назву з батьківською категорією
+    const fullNewName = categoryParent ? `${categoryParent}: ${newNameVal}` : newNameVal
+    
+    if (oldName === fullNewName) {
+      setEditingCategoryName(null)
+      setCategoryNewName('')
+      setCategoryParent('')
+      return
+    }
+    if (allCategoriesList.includes(fullNewName)) return alert('Така категорія вже існує')
+
+    const prevCatList = allCategoriesList.slice()
+    const prevCatBalances = { ...categoriesBalance }
+    
+    setAllCategoriesList(prev => prev.map(c => c === oldName ? fullNewName : c))
+    setCategoriesBalance(prev => {
+      const copy = { ...prev }
+      if (copy[oldName] !== undefined) {
+        copy[fullNewName] = copy[oldName]
+        delete copy[oldName]
+      }
+      return copy
+    })
+    setEditingCategoryName(null)
+    setCategoryNewName('')
+    setCategoryParent('')
+
+    try {
+      const res = await fetch(`http://localhost:3000/categories/${encodeURIComponent(oldName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newName: fullNewName })
+      })
+
+      if (!res.ok) {
+        setAllCategoriesList(prevCatList)
+        setCategoriesBalance(prevCatBalances)
+        const text = await res.text()
+        alert(`Не вдалося оновити категорію: ${text || res.status}`)
+      }
+    } catch (err) {
+      setAllCategoriesList(prevCatList)
+      setCategoriesBalance(prevCatBalances)
+      alert('Помилка мережі при оновленні категорії')
+      console.error(err)
+    }
+  }
+
+  const handleDeleteCategory = async (name: string) => {
+    if (!confirm(`Видалити категорію "${name}"?`)) return
+
+    const prevCatList = allCategoriesList.slice()
+    const prevCatBalances = { ...categoriesBalance }
+    
+    setAllCategoriesList(prev => prev.filter(c => c !== name))
+    setCategoriesBalance(prev => { const copy = { ...prev }; delete copy[name]; return copy })
+
+    try {
+      const res = await fetch(`http://localhost:3000/categories/${encodeURIComponent(name)}`, {
+        method: 'DELETE'
+      })
+
+      if (!res.ok) {
+        setAllCategoriesList(prevCatList)
+        setCategoriesBalance(prevCatBalances)
+        const text = await res.text()
+        alert(`Не вдалося видалити категорію: ${text || res.status}`)
+      } else {
+        const data = await res.json()
+        if (data.categories) setAllCategoriesList(data.categories)
+      }
+    } catch (err) {
+      setAllCategoriesList(prevCatList)
+      setCategoriesBalance(prevCatBalances)
+      alert('Помилка мережі при видаленні категорії')
+      console.error(err)
+    }
+  }
 
   useEffect(()=>{
     socket.on('balance:update', (b:number)=>setBalance(b))
@@ -366,6 +491,27 @@ function App() {
       socket.off('monobank:last-sync')
     }
   },[])
+
+  // Закриття dropdown при кліку поза ним
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.date-filter-dropdown')) {
+        setShowDatePicker(false)
+      }
+      if (!target.closest('.category-filter-dropdown')) {
+        setShowCategoryPicker(false)
+      }
+    }
+    
+    if (showDatePicker || showCategoryPicker) {
+      document.addEventListener('click', handleClickOutside)
+    }
+    
+    return () => {
+      document.removeEventListener('click', handleClickOutside)
+    }
+  }, [showDatePicker, showCategoryPicker])
 
   // ensure transfer selects default to available accounts
   useEffect(() => {
@@ -623,6 +769,65 @@ function App() {
 
   const categoriesByType = allCategories.slice()
 
+  // Функція для отримання діапазону дат в залежності від типу фільтра
+  const getDateRange = () => {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    
+    switch (dateFilterType) {
+      case 'today':
+        return { from: today, to: new Date(today.getTime() + 24 * 60 * 60 * 1000) }
+      
+      case 'yesterday': {
+        const yesterday = new Date(today)
+        yesterday.setDate(yesterday.getDate() - 1)
+        return { from: yesterday, to: today }
+      }
+      
+      case 'current_week': {
+        const weekStart = new Date(today)
+        const dayOfWeek = today.getDay()
+        // В Україні тиждень з понеділка по неділю
+        // getDay: 0=неділя, 1=понеділок, ..., 6=субота
+        // Якщо неділя (0), то понеділок був 6 днів тому
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+        weekStart.setDate(today.getDate() - daysFromMonday)
+        return { from: weekStart, to: new Date() }
+      }
+      
+      case 'last_week': {
+        const currentWeekMonday = new Date(today)
+        const dayOfWeek = today.getDay()
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+        currentWeekMonday.setDate(today.getDate() - daysFromMonday)
+        
+        // Минулий тиждень закінчується в неділю перед поточним понеділком
+        const lastWeekEnd = new Date(currentWeekMonday)
+        const lastWeekStart = new Date(currentWeekMonday)
+        lastWeekStart.setDate(currentWeekMonday.getDate() - 7)
+        return { from: lastWeekStart, to: lastWeekEnd }
+      }
+      
+      case 'current_year':
+        return { from: new Date(now.getFullYear(), 0, 1), to: new Date() }
+      
+      case 'last_year':
+        return { from: new Date(now.getFullYear() - 1, 0, 1), to: new Date(now.getFullYear(), 0, 1) }
+      
+      case 'custom':
+        if (customDateFrom && customDateTo) {
+          return { 
+            from: new Date(customDateFrom), 
+            to: new Date(new Date(customDateTo).getTime() + 24 * 60 * 60 * 1000) 
+          }
+        }
+        return null
+      
+      default:
+        return null
+    }
+  }
+
   const filteredTransactions = transactions
     .filter(t => {
       const accountMatch = filterAccounts.length
@@ -633,7 +838,27 @@ function App() {
       const categoryMatch = filterCategories.length
         ? (t.type === 'transfer' ? false : filterCategories.includes(t.category))
         : true
-      return accountMatch && categoryMatch
+      
+      // Фільтр по даті
+      let dateMatch = true
+      if (dateFilterType !== 'all') {
+        const dateRange = getDateRange()
+        if (dateRange) {
+          const transactionDate = new Date(t.date)
+          dateMatch = transactionDate >= dateRange.from && transactionDate < dateRange.to
+        }
+      }
+      
+      // Фільтр по пошуковому запиту (сума або коментар)
+      let searchMatch = true
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase()
+        const amountStr = String(t.amount)
+        const commentStr = (t.comment || '').toLowerCase()
+        searchMatch = amountStr.includes(query) || commentStr.includes(query)
+      }
+      
+      return accountMatch && categoryMatch && dateMatch && searchMatch
     })
 
   const formatMoney = (value: number) => {
@@ -721,51 +946,20 @@ function App() {
               </ul>
             </div>
 
-            <div className="sidebar-block">
-              <div className="sidebar-block-header">
+            <button 
+              className="auto-rules-sidebar-btn" 
+              onClick={() => setShowCategoriesManage(true)}
+              style={{ marginBottom: '10px', backgroundColor: '#2196f3' }}
+            >
+              <i className="fa-solid fa-list"></i> Категорії
+            </button>
 
-                  <h3>Категорії</h3>
-
-                  <div className="sidebar-block-header-edit-buttons">
-                    <button className="add-btn" onClick={() => openModal('category')} aria-label="Додати категорію">
-                      <i className="fa-solid fa-plus"></i>
-                    </button>
-                    <button className="manage-btn" onClick={() => openManage('category')} aria-label="Керувати категоріями">
-                      <i className="fa-regular fa-pen-to-square"></i>
-                    </button>
-                  </div>
-
-                </div>
-
-              <ul className="list">
-                {allCategories.map(c => (
-                  <li
-                    key={c}
-                    className="list-item"
-                    onClick={() => setFilterCategories(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <div className="list-item-left">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setFilterCategories(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]); }}
-                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
-                      >
-                        {c}:
-                      </button>
-                    </div>
-                    <div className="list-item-right" onClick={(e) => e.stopPropagation()}>{formatMoney(categoriesBalance[c] || 0)} ₴</div>
-                  </li>
-                ))}
-              </ul>
-
-              <button 
-                className="auto-rules-sidebar-btn" 
-                onClick={() => setShowAutoRules(true)}
-              >
-                <i className="fa-solid fa-wand-magic-sparkles"></i> Автоправила
-              </button>
-
-            </div>
+            <button 
+              className="auto-rules-sidebar-btn" 
+              onClick={() => setShowAutoRules(true)}
+            >
+              <i className="fa-solid fa-wand-magic-sparkles"></i> Автоправила
+            </button>
 
           </div>
         </div>
@@ -884,6 +1078,136 @@ function App() {
         </div>
 
         <div className="transactions">
+          <div className="date-filter-bar">
+            <label>Період:</label>
+            <div className="date-filter-dropdown">
+              <button className="date-filter-btn" onClick={() => setShowDatePicker(!showDatePicker)}>
+                {dateFilterType === 'all' && 'За весь час'}
+                {dateFilterType === 'today' && 'За сьогодні'}
+                {dateFilterType === 'yesterday' && 'За вчора'}
+                {dateFilterType === 'current_week' && 'За поточний тиждень'}
+                {dateFilterType === 'last_week' && 'За минулий тиждень'}
+                {dateFilterType === 'current_year' && 'За поточний рік'}
+                {dateFilterType === 'last_year' && 'За минулий рік'}
+                {dateFilterType === 'custom' && `${customDateFrom} - ${customDateTo}`}
+                <i className="fa-solid fa-chevron-down"></i>
+              </button>
+              
+              {showDatePicker && (
+                <div className="date-filter-menu">
+                  <button onClick={() => { setDateFilterType('all'); setShowDatePicker(false); }}>За весь час</button>
+                  <button onClick={() => { setDateFilterType('today'); setShowDatePicker(false); }}>За сьогодні</button>
+                  <button onClick={() => { setDateFilterType('yesterday'); setShowDatePicker(false); }}>За вчора</button>
+                  <button onClick={() => { setDateFilterType('current_week'); setShowDatePicker(false); }}>За поточний тиждень</button>
+                  <button onClick={() => { setDateFilterType('last_week'); setShowDatePicker(false); }}>За минулий тиждень</button>
+                  <button onClick={() => { setDateFilterType('current_year'); setShowDatePicker(false); }}>За поточний рік</button>
+                  <button onClick={() => { setDateFilterType('last_year'); setShowDatePicker(false); }}>За минулий рік</button>
+                  <div className="custom-date-range">
+                    <label>Обрати дати:</label>
+                    <input 
+                      type="date" 
+                      value={customDateFrom} 
+                      onChange={(e) => setCustomDateFrom(e.target.value)}
+                      placeholder="Від"
+                    />
+                    <input 
+                      type="date" 
+                      value={customDateTo} 
+                      onChange={(e) => setCustomDateTo(e.target.value)}
+                      placeholder="До"
+                    />
+                    <button 
+                      onClick={() => { 
+                        if (customDateFrom && customDateTo) {
+                          setDateFilterType('custom'); 
+                          setShowDatePicker(false); 
+                        }
+                      }}
+                      disabled={!customDateFrom || !customDateTo}
+                    >
+                      Застосувати
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="search-box">
+              <i className="fa-solid fa-magnifying-glass"></i>
+              <input 
+                type="text" 
+                placeholder="Пошук по сумі або коментарю..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button 
+                  className="clear-search-btn" 
+                  onClick={() => setSearchQuery('')}
+                  title="Очистити"
+                >
+                  <i className="fa-solid fa-xmark"></i>
+                </button>
+              )}
+            </div>
+
+            <div className="category-filter-dropdown">
+              <button className="category-filter-btn" onClick={() => setShowCategoryPicker(!showCategoryPicker)}>
+                <i className="fa-solid fa-filter"></i>
+                Категорії
+                {filterCategories.length > 0 && <span className="filter-badge">{filterCategories.length}</span>}
+              </button>
+              
+              {showCategoryPicker && (
+                <div className="category-filter-menu">
+                  <div className="category-filter-header">
+                    <span>Оберіть категорії</span>
+                    {filterCategories.length > 0 && (
+                      <button 
+                        className="clear-all-btn" 
+                        onClick={() => setFilterCategories([])}
+                      >
+                        Очистити
+                      </button>
+                    )}
+                  </div>
+                  {allCategories.map(category => {
+                    const isSubcategory = category.includes(':')
+                    const displayName = isSubcategory 
+                      ? category.split(':')[1].trim()
+                      : category
+                    
+                    return (
+                      <label 
+                        key={category} 
+                        className="category-checkbox-item"
+                        style={isSubcategory ? { paddingLeft: '30px', fontSize: '13px' } : {}}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={filterCategories.includes(category)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFilterCategories(prev => [...prev, category])
+                            } else {
+                              setFilterCategories(prev => prev.filter(c => c !== category))
+                            }
+                          }}
+                        />
+                        <span>{displayName}</span>
+                        {isSubcategory && (
+                          <span style={{ color: '#999', fontSize: '11px', marginLeft: '5px' }}>
+                            ({category.split(':')[0].trim()})
+                          </span>
+                        )}
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="filter-bar">
             {(filterAccounts.length || filterCategories.length) ? (
               <>
@@ -891,9 +1215,14 @@ function App() {
                 {filterAccounts.map(a => (
                   <span key={"acc-"+a} className="filter-chip" onClick={() => setFilterAccounts(prev => prev.filter(x => x !== a))}>Рахунок: {a} ✖</span>
                 ))}
-                {filterCategories.map(c => (
-                  <span key={"cat-"+c} className="filter-chip" onClick={() => setFilterCategories(prev => prev.filter(x => x !== c))}>Категорія: {c} ✖</span>
-                ))}
+                {filterCategories.map(c => {
+                  const displayName = c.includes(':') ? c.split(':')[1].trim() : c
+                  return (
+                    <span key={"cat-"+c} className="filter-chip" onClick={() => setFilterCategories(prev => prev.filter(x => x !== c))}>
+                      Категорія: {displayName} ✖
+                    </span>
+                  )
+                })}
                 <button className="linkish" onClick={() => { setFilterAccounts([]); setFilterCategories([]); }}>Очистити</button>
               </>
             ) : (
@@ -962,7 +1291,9 @@ function App() {
                   ) : (
                     <>
                       <div className="col account" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{tr.account}</div>
-                      <div className="col category" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{tr.category}</div>
+                      <div className="col category" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>
+                        {tr.category.includes(':') ? tr.category.split(':')[1].trim() : tr.category}
+                      </div>
                     </>
                   )}
 
@@ -987,10 +1318,13 @@ function App() {
 
           {!hasMore && transactions.length > 0 && (
             <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
-              Всього транзакцій: {total}
+              Всього транзакцій: {filteredTransactions.length}
             </div>
           )}
         </div>
+        
+        </div>
+      </div>
 
         {showModal && (
           <div className="modal-overlay" onClick={closeModal}>
@@ -1171,16 +1505,178 @@ function App() {
           />
         )}
 
+        {showCategoriesManage && (
+          <div className="auto-rules-overlay categories-overlay" onClick={() => setShowCategoriesManage(false)}>
+            <div className="auto-rules-container" onClick={(e) => e.stopPropagation()}>
+              <div className="auto-rules-header">
+                <h2>Управління категоріями</h2>
+                <button className="auto-rules-close-btn" onClick={() => setShowCategoriesManage(false)}>
+                  <i className="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+
+              <div className="auto-rules-content">
+                <div className="auto-rules-description">
+                  <p>Створюйте та редагуйте категорії для класифікації ваших транзакцій.</p>
+                </div>
+
+                {!editingCategoryName && (
+                  <button className="add-rule-btn" onClick={() => { setEditingCategoryName('__new__'); setCategoryNewName(''); setCategoryParent(''); }}>
+                    <i className="fa-solid fa-plus"></i> Додати категорію
+                  </button>
+                )}
+
+                {editingCategoryName === '__new__' && (
+                  <div className="rule-form">
+                    <h3>Нова категорія</h3>
+                    
+                    <div className="form-group">
+                      <label>Батьківська категорія (необов'язково):</label>
+                      <select
+                        value={categoryParent}
+                        onChange={(e) => setCategoryParent(e.target.value)}
+                      >
+                        <option value="">Немає (головна категорія)</option>
+                        {allCategories.filter(c => !c.includes(':')).map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                      <small>Підкатегорії дозволяють групувати схожі категорії</small>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Назва {categoryParent ? 'підкатегорії' : 'категорії'}:</label>
+                      <input
+                        type="text"
+                        value={categoryNewName}
+                        onChange={(e) => setCategoryNewName(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleCreateCategory()}
+                        placeholder={categoryParent ? "Наприклад: Facebook" : "Наприклад: Реклама, Транспорт"}
+                        autoFocus
+                      />
+                      {categoryParent && (
+                        <small>Буде створено: {categoryParent}: {categoryNewName}</small>
+                      )}
+                    </div>
+
+                    <div className="form-actions">
+                      <button className="save-btn" onClick={handleCreateCategory}>
+                        Створити
+                      </button>
+                      <button className="cancel-btn" onClick={() => { setEditingCategoryName(null); setCategoryNewName(''); setCategoryParent(''); }}>
+                        Скасувати
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {editingCategoryName && editingCategoryName !== '__new__' && (
+                  <div className="rule-form">
+                    <h3>Редагувати категорію</h3>
+                    
+                    <div className="form-group">
+                      <label>Батьківська категорія (необов'язково):</label>
+                      <select
+                        value={categoryParent}
+                        onChange={(e) => setCategoryParent(e.target.value)}
+                      >
+                        <option value="">Немає (головна категорія)</option>
+                        {allCategories.filter(c => !c.includes(':') && c !== editingCategoryName).map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Назва {categoryParent ? 'підкатегорії' : 'категорії'}:</label>
+                      <input
+                        type="text"
+                        value={categoryNewName}
+                        onChange={(e) => setCategoryNewName(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleUpdateCategory(editingCategoryName)}
+                        placeholder={categoryParent ? "Наприклад: Facebook" : "Наприклад: Реклама"}
+                        autoFocus
+                      />
+                      {categoryParent && (
+                        <small>Буде збережено: {categoryParent}: {categoryNewName}</small>
+                      )}
+                    </div>
+
+                    <div className="form-actions">
+                      <button className="save-btn" onClick={() => handleUpdateCategory(editingCategoryName)}>
+                        Оновити
+                      </button>
+                      <button className="cancel-btn" onClick={() => { setEditingCategoryName(null); setCategoryNewName(''); setCategoryParent(''); }}>
+                        Скасувати
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="rules-list">
+                  <h3>Категорії ({allCategories.length})</h3>
+                  
+                  {allCategories.length === 0 ? (
+                    <p className="no-rules">Немає категорій. Додайте першу категорію!</p>
+                  ) : (
+                    <ul>
+                      {allCategories.map(category => {
+                        const isSubcategory = category.includes(':')
+                        const displayName = isSubcategory ? category.split(':')[1].trim() : category
+                        
+                        return (
+                          <li 
+                            key={category} 
+                            className={`rule-item ${isSubcategory ? 'subcategory-item' : ''}`}
+                            style={isSubcategory ? { marginLeft: '20px',background: '#f8f9fa' } : {}}
+                          >
+                            <div className="rule-info">
+                              <h4>{displayName}</h4>
+                            </div>
+                            <div className="rule-actions">
+                              <button 
+                                className="edit-btn"
+                                onClick={() => { 
+                                  setEditingCategoryName(category);
+                                  // Парсимо батьківську категорію та назву
+                                  if (category.includes(':')) {
+                                    const [parent, name] = category.split(':').map(s => s.trim());
+                                    setCategoryParent(parent);
+                                    setCategoryNewName(name);
+                                  } else {
+                                    setCategoryParent('');
+                                    setCategoryNewName(category);
+                                  }
+                                }}
+                                title="Редагувати"
+                              >
+                                <i className="fa-solid fa-pen"></i>
+                              </button>
+                              <button 
+                                className="delete-btn"
+                                onClick={() => handleDeleteCategory(category)}
+                                title="Видалити"
+                              >
+                                <i className="fa-solid fa-trash"></i>
+                              </button>
+                            </div>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showAutoRules && (
           <AutoRules
             onClose={() => setShowAutoRules(false)}
             categories={allCategoriesList}
           />
         )}
-      </div>
-
-      </div>
-      
     </div>
   )
 }
