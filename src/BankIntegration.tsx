@@ -11,9 +11,10 @@ import {
 interface BankIntegrationProps {
   onClose: () => void
   accountsList: string[]
+  lastMonobankSync: string | null
 }
 
-function BankIntegration({ onClose, accountsList }: BankIntegrationProps) {
+function BankIntegration({ onClose, accountsList, lastMonobankSync }: BankIntegrationProps) {
   const [step, setStep] = useState<'token' | 'mapping' | 'import'>('token')
   const [token, setToken] = useState('')
   const [monobankAccounts, setMonobankAccounts] = useState<MonobankAccount[]>([])
@@ -146,6 +147,22 @@ function BankIntegration({ onClose, accountsList }: BankIntegrationProps) {
           <h2>Інтеграція з Monobank</h2>
           <button onClick={onClose} className="close-btn">×</button>
         </div>
+
+        {lastMonobankSync && (
+          <div className="monobank-sync-info">
+            <i className="fa-solid fa-clock"></i>
+            <span>Останнє оновлення:</span>
+            <span className="sync-time">
+              {new Date(lastMonobankSync).toLocaleString('uk', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })}
+            </span>
+          </div>
+        )}
 
         {error && <div className="error-message">{error}</div>}
 

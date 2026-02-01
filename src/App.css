@@ -117,9 +117,15 @@ h3 {
 }
 
 .header {
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 20px;
   position: relative;
+}
+
+.header h1 {
+  margin: 0;
 }
 
 .auto-rules-header-btn {

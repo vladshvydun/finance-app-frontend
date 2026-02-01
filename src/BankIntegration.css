@@ -234,3 +234,28 @@
   color: #555;
   line-height: 1.5;
 }
+
+.monobank-sync-info {
+  margin-bottom: 15px;
+  padding: 10px 15px;
+  background-color: #f0f8ff;
+  border-radius: 6px;
+  border-left: 3px solid #28a745;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.monobank-sync-info i {
+  color: #28a745;
+}
+
+.monobank-sync-info span {
+  color: #555;
+}
+
+.monobank-sync-info .sync-time {
+  font-weight: 600;
+  color: #333;
+}

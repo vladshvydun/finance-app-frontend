@@ -3,6 +3,9 @@ import { io } from 'socket.io-client'
 import './App.css'
 import BankIntegration from './BankIntegration'
 import AutoRules from './AutoRules'
+import Login from './components/Login'
+import Register from './components/Register'
+import UserProfile from './components/UserProfile'
 
 export const socket = io('http://localhost:3000')
 
@@ -19,6 +22,12 @@ type Transaction = {
 }
 
 function App() {
+  // Auth state
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [user, setUser] = useState<any>(null)
+  const [authView, setAuthView] = useState<'login' | 'register'>('login')
+  const [isLoadingAuth, setIsLoadingAuth] = useState(true)
+
   const [activeTab, setActiveTab] = useState<'expense'|'income'|'transfer'>('expense')
   const [amount, setAmount] = useState('')
   const todayStr = new Date().toISOString().slice(0,10)
@@ -99,6 +108,46 @@ function App() {
     setManageEditing(null)
     setShowManageModal(true)
   }
+
+  // Auth handlers
+  const handleLogin = (token: string, userData: any) => {
+    setIsAuthenticated(true)
+    setUser(userData)
+    setIsLoadingAuth(false)
+  }
+
+  const handleRegister = (token: string, userData: any) => {
+    setIsAuthenticated(true)
+    setUser(userData)
+    setIsLoadingAuth(false)
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    setIsAuthenticated(false)
+    setUser(null)
+    setAuthView('login')
+  }
+
+  // Перевірка авторизації при завантаженні
+  useEffect(() => {
+    const token = localStorage.getItem('token')
+    const storedUser = localStorage.getItem('user')
+    
+    if (token && storedUser) {
+      try {
+        const userData = JSON.parse(storedUser)
+        setUser(userData)
+        setIsAuthenticated(true)
+      } catch (err) {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+      }
+    }
+    
+    setIsLoadingAuth(false)
+  }, [])
 
   const closeManage = () => setShowManageModal(false)
 
@@ -874,10 +923,37 @@ function App() {
     return sign + intStr + '.' + fracStr
   }
 
+  // Якщо йде перевірка авторизації
+  if (isLoadingAuth) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        fontSize: '18px',
+        color: '#666'
+      }}>
+        Завантаження...
+      </div>
+    )
+  }
+
+  // Якщо не авторизований - показуємо форму login/register
+  if (!isAuthenticated) {
+    if (authView === 'login') {
+      return <Login onLogin={handleLogin} onSwitchToRegister={() => setAuthView('register')} />
+    } else {
+      return <Register onRegister={handleRegister} onSwitchToLogin={() => setAuthView('login')} />
+    }
+  }
+
+  // Основний інтерфейс для авторизованих користувачів
   return (
     <div className="app-container">
       <div className="header">
         <h1>Finance App</h1>
+        <UserProfile user={user} onLogout={handleLogout} />
       </div>
 
       <div className="container">
@@ -888,21 +964,6 @@ function App() {
 
             <div className="sidebar-block">
               <h3>Баланс: {formatMoney(balance)} ₴</h3>
-              {lastMonobankSync && (
-                <div className="monobank-sync-info">
-                  <i className="fa-solid fa-clock"></i>
-                  <span>Останнє оновлення Monobank:</span>
-                  <span className="sync-time">
-                    {new Date(lastMonobankSync).toLocaleString('uk', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </span>
-                </div>
-              )}
             </div>
 
             <div className="sidebar-block">
@@ -1502,6 +1563,7 @@ function App() {
           <BankIntegration
             onClose={() => setShowBankIntegration(false)}
             accountsList={accountsList}
+            lastMonobankSync={lastMonobankSync}
           />
         )}
 
