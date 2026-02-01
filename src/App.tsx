@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { io } from 'socket.io-client'
 import './App.css'
+import BankIntegration from './BankIntegration'
+import AutoRules from './AutoRules'
 
 export const socket = io('http://localhost:3000')
 
@@ -32,6 +34,18 @@ function App() {
   const [categoriesBalance, setCategoriesBalance] = useState<Record<string,number>>({})
   const [balance, setBalance] = useState(0)
 
+  // Pagination & Infinity Scroll
+  const [offset, setOffset] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [total, setTotal] = useState(0)
+
+  // Масове видалення
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+
+  // Час останньої синхронізації Monobank
+  const [lastMonobankSync, setLastMonobankSync] = useState<string | null>(null)
+
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editAmount, setEditAmount] = useState('')
   const [editCategory, setEditCategory] = useState('')
@@ -56,6 +70,8 @@ function App() {
   const [newStartBalance, setNewStartBalance] = useState('0')
   const [showManageModal, setShowManageModal] = useState(false)
   const [manageType, setManageType] = useState<'category'|'account'>('category')
+  const [showBankIntegration, setShowBankIntegration] = useState(false)
+  const [showAutoRules, setShowAutoRules] = useState(false)
   
   const [manageEditing, setManageEditing] = useState<string | null>(null)
   const [manageTempName, setManageTempName] = useState('')
@@ -290,31 +306,40 @@ function App() {
 
   useEffect(()=>{
     socket.on('balance:update', (b:number)=>setBalance(b))
-    socket.on('transactions:update', (t:Transaction[])=>setTransactions(t))
+    socket.on('transactions:update', ()=>{
+      // При оновленні через Socket.IO - перезавантажуємо транзакції з сервера
+      fetch('http://localhost:3000/transactions?limit=20&offset=0')
+        .then(r=>r.json())
+        .then((data: { transactions: Transaction[], total: number, hasMore: boolean })=>{
+          setTransactions(data.transactions)
+          setTotal(data.total)
+          setHasMore(data.hasMore)
+          setOffset(20)
+        })
+        .catch(err => console.error('Failed to reload transactions:', err))
+    })
     socket.on('accounts:update', (ab)=>setAccountsBalance(ab))
     socket.on('categories:update', (cb)=>setCategoriesBalance(cb))
+    socket.on('monobank:last-sync', (time: string) => setLastMonobankSync(time))
 
-    fetch('http://localhost:3000/transactions')
+    fetch('http://localhost:3000/transactions?limit=20&offset=0')
       .then(r=>r.json())
-      .then((t:Transaction[])=>{
-        setTransactions(t)
-        const b = t.reduce((sum,tr)=> tr.type==='income'? sum+Number(tr.amount): tr.type==='expense' ? sum-Number(tr.amount) : sum,0)
-        setBalance(b)
-        const ab:Record<string,number>={}
-        const cb:Record<string,number>={}
-        t.forEach(tr=>{
-          if (tr.type === 'transfer') {
-            const fromAcc = tr.from_account || tr.account
-            const toAcc = tr.to_account
-            if (fromAcc) ab[fromAcc] = (ab[fromAcc]||0) - Number(tr.amount)
-            if (toAcc) ab[toAcc] = (ab[toAcc]||0) + Number(tr.amount)
-            return
-          }
-          ab[tr.account] = (ab[tr.account]||0) + (tr.type==='income'?Number(tr.amount):-Number(tr.amount))
-          cb[tr.category] = (cb[tr.category]||0) + (tr.type==='income'?Number(tr.amount):-Number(tr.amount))
-        })
-        setAccountsBalance(ab)
-        setCategoriesBalance(cb)
+      .then((data: { transactions: Transaction[], total: number, hasMore: boolean })=>{
+        setTransactions(data.transactions)
+        setTotal(data.total)
+        setHasMore(data.hasMore)
+        setOffset(20)
+
+        // Завантажуємо баланси окремо (враховують ВСІ транзакції)
+        fetch('http://localhost:3000/balances')
+          .then(r => r.json())
+          .then((balances: { balance: number, accountsBalance: Record<string,number>, categoriesBalance: Record<string,number> }) => {
+            setBalance(balances.balance)
+            setAccountsBalance(balances.accountsBalance)
+            setCategoriesBalance(balances.categoriesBalance)
+          })
+          .catch(() => {})
+        
         // load persistent accounts/categories from backend
         fetch('http://localhost:3000/accounts')
           .then(r => r.json())
@@ -325,6 +350,12 @@ function App() {
           .then(r => r.json())
           .then((c: string[]) => setAllCategoriesList(c))
           .catch(() => {})
+        
+        // Завантажуємо час останньої синхронізації Monobank
+        fetch('http://localhost:3000/monobank/last-sync')
+          .then(r => r.json())
+          .then((data: { lastSync: string | null }) => setLastMonobankSync(data.lastSync))
+          .catch(() => {})
       })
 
     return ()=>{
@@ -332,6 +363,7 @@ function App() {
       socket.off('transactions:update')
       socket.off('accounts:update')
       socket.off('categories:update')
+      socket.off('monobank:last-sync')
     }
   },[])
 
@@ -343,6 +375,95 @@ function App() {
       setTransferTo(prev => prev && accountsList.includes(prev) ? prev : (accountsList[1] || accountsList[0]))
     }
   }, [accountsList])
+
+  // Infinity scroll - завантаження наступних транзакцій
+  const loadMoreTransactions = async () => {
+    // Не завантажуємо якщо offset=0 (initial fetch ще не завершився) або немає більше даних
+    if (!hasMore || loadingMore || offset === 0) return
+    
+    setLoadingMore(true)
+    try {
+      const response = await fetch(`http://localhost:3000/transactions?limit=20&offset=${offset}`)
+      const data: { transactions: Transaction[], total: number, hasMore: boolean } = await response.json()
+      
+      setTransactions(prev => [...prev, ...data.transactions])
+      setOffset(prev => prev + 20)
+      setHasMore(data.hasMore)
+      setTotal(data.total)
+    } catch (err) {
+      console.error('Помилка завантаження транзакцій:', err)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  // Інтерсекція для infinity scroll
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore) {
+          loadMoreTransactions()
+        }
+      },
+      { threshold: 0.1 }
+    )
+
+    const sentinel = document.getElementById('scroll-sentinel')
+    if (sentinel) observer.observe(sentinel)
+
+    return () => {
+      if (sentinel) observer.unobserve(sentinel)
+    }
+  }, [hasMore, loadingMore, offset])
+
+  // Масове видалення
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return
+    
+    if (!confirm(`Видалити ${selectedIds.size} транзакцій?`)) return
+
+    try {
+      await fetch('http://localhost:3000/transactions/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds) })
+      })
+      
+      setSelectedIds(new Set())
+      // Перезавантажуємо перші 20 транзакцій
+      const response = await fetch('http://localhost:3000/transactions?limit=20&offset=0')
+      const data: { transactions: Transaction[], total: number, hasMore: boolean } = await response.json()
+      setTransactions(data.transactions)
+      setTotal(data.total)
+      setHasMore(data.hasMore)
+      setOffset(20)
+    } catch (err) {
+      alert('Помилка при видаленні')
+      console.error(err)
+    }
+  }
+
+  // Переключення виділення транзакції
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(id)) {
+        newSet.delete(id)
+      } else {
+        newSet.add(id)
+      }
+      return newSet
+    })
+  }
+
+  // Виділити всі / зняти виділення
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredTransactions.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filteredTransactions.map(t => t.id)))
+    }
+  }
 
   const addTransaction = async ()=>{
     const parsed = String(amount).replace(',', '.')
@@ -514,8 +635,6 @@ function App() {
         : true
       return accountMatch && categoryMatch
     })
-    .slice()
-    .reverse()
 
   const formatMoney = (value: number) => {
     const num = Math.round((Number(value) || 0) * 100) / 100
@@ -544,6 +663,21 @@ function App() {
 
             <div className="sidebar-block">
               <h3>Баланс: {formatMoney(balance)} ₴</h3>
+              {lastMonobankSync && (
+                <div className="monobank-sync-info">
+                  <i className="fa-solid fa-clock"></i>
+                  <span>Останнє оновлення Monobank:</span>
+                  <span className="sync-time">
+                    {new Date(lastMonobankSync).toLocaleString('uk', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="sidebar-block">
@@ -557,6 +691,9 @@ function App() {
                     </button>
                     <button className="manage-btn" onClick={() => openManage('account')} aria-label="Керувати рахунками">
                       <i className="fa-regular fa-pen-to-square"></i>
+                    </button>
+                    <button className="bank-btn" onClick={() => setShowBankIntegration(true)} aria-label="Інтеграція з банком">
+                      <i className="fa-solid fa-building-columns"></i>
                     </button>
                   </div>
 
@@ -620,6 +757,13 @@ function App() {
                   </li>
                 ))}
               </ul>
+
+              <button 
+                className="auto-rules-sidebar-btn" 
+                onClick={() => setShowAutoRules(true)}
+              >
+                <i className="fa-solid fa-wand-magic-sparkles"></i> Автоправила
+              </button>
 
             </div>
 
@@ -760,12 +904,31 @@ function App() {
           <h3>Останні записи</h3>
 
           <div className="transactions-header">
+            <div className="col checkbox-col">
+              <input 
+                type="checkbox" 
+                checked={selectedIds.size > 0 && selectedIds.size === filteredTransactions.length}
+                onChange={toggleSelectAll}
+                title="Виділити всі"
+              />
+            </div>
             <div className="col date">Дата</div>
             <div className="col account">Рахунок</div>
             <div className="col category">Категорія</div>
             <div className="col comment">Коментар</div>
             <div className="col amount">Сума</div>
           </div>
+
+          {selectedIds.size > 0 && (
+            <div className="bulk-actions">
+              <button 
+                onClick={handleBulkDelete}
+                className="delete-selected-btn"
+              >
+                Видалити обрані ({selectedIds.size})
+              </button>
+            </div>
+          )}
 
           <ul className="transactions-list">
             {filteredTransactions.map(tr => {
@@ -777,35 +940,56 @@ function App() {
                 <li
                   key={tr.id}
                   className={`transaction-row ${tr.type === 'income' ? 'transaction-income' : tr.type === 'expense' ? 'transaction-expense' : 'transaction-transfer'}`}
-                  onClick={() => startEdit(tr)}
-                  style={{ cursor: 'pointer' }}
                 >
-                  <div className="col date">
+                  <div className="col checkbox-col" onClick={(e) => e.stopPropagation()}>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedIds.has(tr.id)}
+                      onChange={() => toggleSelect(tr.id)}
+                    />
+                  </div>
+                  
+                  <div className="col date" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>
                     <div>{new Date(tr.date).toLocaleDateString()}</div>
                     <div className="time">{new Date(tr.date).toLocaleTimeString('uk', { hour: '2-digit', minute: '2-digit' })}</div>
                   </div>
 
                   {isTransfer ? (
                     <>
-                      <div className="col account">{fromAcc} → {toAcc}</div>
-                      <div className="col category">Переказ</div>
+                      <div className="col account" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{fromAcc} → {toAcc}</div>
+                      <div className="col category" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>Переказ</div>
                     </>
                   ) : (
                     <>
-                      <div className="col account">{tr.account}</div>
-                      <div className="col category">{tr.category}</div>
+                      <div className="col account" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{tr.account}</div>
+                      <div className="col category" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{tr.category}</div>
                     </>
                   )}
 
-                  <div className="col comment">{tr.comment || ''}</div>
+                  <div className="col comment" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{tr.comment || ''}</div>
 
-                  <div className={`col amount ${tr.type === 'income' ? 'amount-positive' : 'amount-negative'}`}>
+                  <div 
+                    className={`col amount ${tr.type === 'income' ? 'amount-positive' : 'amount-negative'}`}
+                    onClick={() => startEdit(tr)} 
+                    style={{ cursor: 'pointer' }}
+                  >
                     {isTransfer ? `-${formatMoney(Number(tr.amount))} ₴` : `${tr.type === 'income' ? '+' : '-'}${formatMoney(Number(tr.amount))} ₴`}
                   </div>
                 </li>
               )
             })}
+            
+            {/* Sentinel для infinity scroll */}
+            <div id="scroll-sentinel" style={{ height: '20px', margin: '10px 0' }}>
+              {loadingMore && <div style={{ textAlign: 'center', color: '#666' }}>Завантаження...</div>}
+            </div>
           </ul>
+
+          {!hasMore && transactions.length > 0 && (
+            <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
+              Всього транзакцій: {total}
+            </div>
+          )}
         </div>
 
         {showModal && (
@@ -978,6 +1162,20 @@ function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {showBankIntegration && (
+          <BankIntegration
+            onClose={() => setShowBankIntegration(false)}
+            accountsList={accountsList}
+          />
+        )}
+
+        {showAutoRules && (
+          <AutoRules
+            onClose={() => setShowAutoRules(false)}
+            categories={allCategoriesList}
+          />
         )}
       </div>
 

@@ -1,0 +1,236 @@
+.modal-content-bank {
+  background: white;
+  padding: 30px;
+  border-radius: 12px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.bank-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.bank-header h2 {
+  margin: 0;
+  color: #333;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 32px;
+  cursor: pointer;
+  color: #999;
+  line-height: 1;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+}
+
+.close-btn:hover {
+  color: #333;
+}
+
+.error-message {
+  background-color: #fee;
+  border: 1px solid #fcc;
+  color: #c33;
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+}
+
+.step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.step-content p {
+  margin: 0;
+  color: #555;
+  line-height: 1.5;
+}
+
+.step-content a {
+  color: #4a90e2;
+  text-decoration: none;
+}
+
+.step-content a:hover {
+  text-decoration: underline;
+}
+
+.token-input {
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  width: 100%;
+  font-family: monospace;
+}
+
+.token-input:focus {
+  outline: none;
+  border-color: #4a90e2;
+}
+
+.primary-btn {
+  padding: 12px 24px;
+  background-color: #4a90e2;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.primary-btn:hover:not(:disabled) {
+  background-color: #357abd;
+}
+
+.primary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.secondary-btn {
+  padding: 12px 24px;
+  background-color: #6c757d;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.secondary-btn:hover {
+  background-color: #5a6268;
+}
+
+.mapping-form {
+  background-color: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+}
+
+.form-row-bank {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+
+.form-row-bank label {
+  font-weight: 500;
+  color: #333;
+}
+
+.form-row-bank select,
+.form-row-bank input {
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.form-row-bank select:focus,
+.form-row-bank input:focus {
+  outline: none;
+  border-color: #4a90e2;
+}
+
+.mappings-list {
+  background-color: #f8f9fa;
+  padding: 15px;
+  border-radius: 8px;
+}
+
+.mappings-list h4 {
+  margin: 0 0 10px 0;
+  color: #333;
+  font-size: 14px;
+}
+
+.mapping-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.mapping-item span {
+  color: #555;
+  font-size: 14px;
+}
+
+.remove-btn {
+  background: none;
+  border: none;
+  color: #dc3545;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+}
+
+.remove-btn:hover {
+  color: #c82333;
+}
+
+.step-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.step-buttons button {
+  flex: 1;
+}
+
+.import-form {
+  background-color: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+}
+
+.info-box {
+  background-color: #e7f3ff;
+  border-left: 4px solid #4a90e2;
+  padding: 15px;
+  border-radius: 6px;
+}
+
+.info-box p {
+  margin: 0 0 10px 0;
+  font-weight: 500;
+  color: #333;
+}
+
+.info-box ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.info-box li {
+  margin-bottom: 5px;
+  color: #555;
+  line-height: 1.5;
+}
