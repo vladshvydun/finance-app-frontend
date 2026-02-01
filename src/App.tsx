@@ -952,6 +952,7 @@ function App() {
   return (
     <div className="app-container">
       <div className="header">
+        <div className="header-spacer"></div>
         <h1>Finance App</h1>
         <UserProfile user={user} onLogout={handleLogout} />
       </div>
@@ -1140,7 +1141,6 @@ function App() {
 
         <div className="transactions">
           <div className="date-filter-bar">
-            <label>Період:</label>
             <div className="date-filter-dropdown">
               <button className="date-filter-btn" onClick={() => setShowDatePicker(!showDatePicker)}>
                 {dateFilterType === 'all' && 'За весь час'}
@@ -1256,11 +1256,6 @@ function App() {
                           }}
                         />
                         <span>{displayName}</span>
-                        {isSubcategory && (
-                          <span style={{ color: '#999', fontSize: '11px', marginLeft: '5px' }}>
-                            ({category.split(':')[0].trim()})
-                          </span>
-                        )}
                       </label>
                     )
                   })}
