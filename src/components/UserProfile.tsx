@@ -30,15 +30,6 @@ export default function UserProfile({ user, onLogout }: UserProfileProps) {
     onLogout()
   }
 
-  // Отримуємо ініціали користувача
-  const getInitials = (name: string) => {
-    const parts = name.split(' ')
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase()
-    }
-    return name.substring(0, 2).toUpperCase()
-  }
-
   return (
     <div className="user-profile" ref={dropdownRef}>
       <button 
@@ -47,7 +38,7 @@ export default function UserProfile({ user, onLogout }: UserProfileProps) {
         title={user.name}
       >
         <div className="profile-avatar">
-          {getInitials(user.name)}
+          <i className="fa-solid fa-gear"></i>
         </div>
       </button>
 

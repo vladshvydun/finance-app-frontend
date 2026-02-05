@@ -15,13 +15,12 @@ interface BankIntegrationProps {
 }
 
 function BankIntegration({ onClose, accountsList, lastMonobankSync }: BankIntegrationProps) {
-  const [step, setStep] = useState<'token' | 'mapping' | 'import'>('token')
+  const [step, setStep] = useState<'token' | 'mapping'>('token')
   const [token, setToken] = useState('')
   const [monobankAccounts, setMonobankAccounts] = useState<MonobankAccount[]>([])
   const [accountMapping, setAccountMapping] = useState<Record<string, string>>({})
   const [selectedLocalAccount, setSelectedLocalAccount] = useState('')
   const [selectedBankAccount, setSelectedBankAccount] = useState('')
-  const [importAccount, setImportAccount] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [loading, setLoading] = useState(false)
@@ -34,7 +33,7 @@ function BankIntegration({ onClose, accountsList, lastMonobankSync }: BankIntegr
         if (data && data.token) {
           setToken(data.token)
           setAccountMapping(data.account_mapping)
-          setStep('import')
+          setStep('mapping')
           loadMonobankAccounts(data.token)
         }
       })
@@ -85,17 +84,80 @@ function BankIntegration({ onClose, accountsList, lastMonobankSync }: BankIntegr
     })
   }
 
-  const saveIntegration = async () => {
-    if (Object.keys(accountMapping).length === 0) {
-      setError('Додайте хоча б один мапінг рахунків')
+  const handleImport = async () => {
+    if (!selectedLocalAccount || !selectedBankAccount) {
+      setError('Оберіть обидва рахунки')
       return
     }
+    if (!dateFrom) {
+      setError('Оберіть початкову дату для імпорту')
+      return
+    }
+
+    // Якщо кінцева дата не вказана, використовуємо сьогоднішню
+    const finalDateTo = dateTo || new Date().toISOString().split('T')[0]
 
     setLoading(true)
     setError('')
     try {
-      await saveBankIntegration(token, accountMapping)
-      setStep('import')
+      // Спочатку зберігаємо підключення
+      const newMapping = {
+        ...accountMapping,
+        [selectedLocalAccount]: selectedBankAccount
+      }
+      await saveBankIntegration(token, newMapping)
+      setAccountMapping(newMapping)
+
+      // Розбиваємо період на частини по 31 день (обмеження API Monobank)
+      const startDate = new Date(dateFrom)
+      const endDate = new Date(finalDateTo)
+      const periods: Array<{ from: string; to: string }> = []
+      
+      let currentStart = new Date(startDate)
+      while (currentStart < endDate) {
+        const currentEnd = new Date(currentStart)
+        currentEnd.setDate(currentEnd.getDate() + 30) // 31 день включно
+        
+        if (currentEnd > endDate) {
+          currentEnd.setTime(endDate.getTime())
+        }
+        
+        periods.push({
+          from: currentStart.toISOString().split('T')[0],
+          to: currentEnd.toISOString().split('T')[0]
+        })
+        
+        currentStart.setDate(currentEnd.getDate() + 1)
+      }
+
+      // Імпортуємо транзакції для кожного періоду
+      let totalImported = 0
+      let totalSkipped = 0
+      
+      for (let i = 0; i < periods.length; i++) {
+        const period = periods[i]
+        
+        // Додаємо затримку 60 секунд між запитами (обмеження API Monobank)
+        if (i > 0) {
+          setError(`Очікування 60 секунд перед наступним запитом (${i}/${periods.length})...`)
+          await new Promise(resolve => setTimeout(resolve, 60000))
+        }
+        
+        setError(`Імпорт періоду ${i + 1}/${periods.length}: ${period.from} - ${period.to}`)
+        const result = await importMonobankTransactions(token, selectedBankAccount, period.from, period.to)
+        totalImported += result.imported
+        totalSkipped += result.skipped
+      }
+      
+      setError('')
+      
+      alert(`Рахунок підключено!\nІмпортовано: ${totalImported}, Пропущено (дублікати): ${totalSkipped}`)
+      
+      // Скидаємо поля форми
+      setSelectedLocalAccount('')
+      setSelectedBankAccount('')
+      setDateFrom('')
+      setDateTo('')
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -103,27 +165,35 @@ function BankIntegration({ onClose, accountsList, lastMonobankSync }: BankIntegr
     }
   }
 
-  const handleImport = async () => {
-    if (!importAccount || !dateFrom || !dateTo) {
-      setError('Заповніть всі поля')
-      return
-    }
-
-    const accountId = accountMapping[importAccount]
-    if (!accountId) {
-      setError('Рахунок не підключений')
+  const deleteIntegration = async () => {
+    const shouldConfirm = Object.keys(accountMapping).length > 0
+    
+    if (shouldConfirm && !confirm('Ви впевнені, що хочете видалити інтеграцію з Monobank?')) {
       return
     }
 
     setLoading(true)
     setError('')
     try {
-      const result = await importMonobankTransactions(token, accountId, dateFrom, dateTo)
-      alert(`Імпортовано: ${result.imported}, Пропущено (дублікати): ${result.skipped}`)
-      setDateFrom('')
-      setDateTo('')
+      const res = await fetch('http://localhost:3000/bank-integrations', {
+        method: 'DELETE'
+      })
+      
+      if (!res.ok) {
+        throw new Error('Не вдалося видалити інтеграцію')
+      }
+
+      // Скидаємо стан до початкового
+      setToken('')
+      setMonobankAccounts([])
+      setAccountMapping({})
+      setStep('token')
+      
+      if (shouldConfirm) {
+        alert('Інтеграцію успішно видалено')
+      }
     } catch (err: any) {
-      setError(err.message)
+      setError(err.message || 'Помилка при видаленні інтеграції')
     } finally {
       setLoading(false)
     }
@@ -185,7 +255,7 @@ function BankIntegration({ onClose, accountsList, lastMonobankSync }: BankIntegr
         {step === 'mapping' && (
           <div className="step-content">
             <h3>Підключення рахунків</h3>
-            <p>Зв'яжіть ваші локальні рахунки з рахунками в Monobank</p>
+            <p>Оберіть рахунки та період для імпорту транзакцій</p>
 
             <div className="mapping-form">
               <div className="form-row-bank">
@@ -213,7 +283,33 @@ function BankIntegration({ onClose, accountsList, lastMonobankSync }: BankIntegr
                 </select>
               </div>
 
-              <button onClick={addMapping} className="secondary-btn">Додати зв'язок</button>
+              {selectedBankAccount && (
+                <>
+                  <div className="form-row-bank">
+                    <label>Від (дата):</label>
+                    <input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      max={new Date().toISOString().split('T')[0]}
+                    />
+                  </div>
+
+                  <div className="form-row-bank">
+                    <label>До (дата):</label>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      max={new Date().toISOString().split('T')[0]}
+                    />
+                  </div>
+                </>
+              )}
+
+              <button onClick={handleImport} disabled={loading} className="primary-btn">
+                {loading ? 'Імпорт...' : 'Імпортувати'}
+              </button>
             </div>
 
             {Object.keys(accountMapping).length > 0 && (
@@ -231,70 +327,27 @@ function BankIntegration({ onClose, accountsList, lastMonobankSync }: BankIntegr
               </div>
             )}
 
-            <div className="step-buttons">
-              <button onClick={() => setStep('token')} className="secondary-btn">Назад</button>
-              <button onClick={saveIntegration} disabled={loading} className="primary-btn">
-                {loading ? 'Збереження...' : 'Зберегти і продовжити'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === 'import' && (
-          <div className="step-content">
-            <h3>Імпорт транзакцій</h3>
-            <p>Оберіть рахунок та період для імпорту транзакцій</p>
-
-            <div className="import-form">
-              <div className="form-row-bank">
-                <label>Рахунок:</label>
-                <select value={importAccount} onChange={(e) => setImportAccount(e.target.value)}>
-                  <option value="">Оберіть рахунок</option>
-                  {Object.keys(accountMapping).map(acc => (
-                    <option key={acc} value={acc}>{acc}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-row-bank">
-                <label>Від (дата):</label>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  max={new Date().toISOString().split('T')[0]}
-                />
-              </div>
-
-              <div className="form-row-bank">
-                <label>До (дата):</label>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  max={new Date().toISOString().split('T')[0]}
-                />
-              </div>
-
-              <button onClick={handleImport} disabled={loading} className="primary-btn">
-                {loading ? 'Імпорт...' : 'Імпортувати транзакції'}
-              </button>
-            </div>
-
             <div className="info-box">
               <p>💡 <strong>Важливо:</strong></p>
               <ul>
-                <li>Максимальний період імпорту - 31 день</li>
+                <li>Для періодів більше 31 дня імпорт відбувається частинами (автоматично)</li>
                 <li>Дублікати транзакцій автоматично пропускаються</li>
                 <li>Категорії визначаються автоматично за MCC кодом</li>
               </ul>
             </div>
 
             <div className="step-buttons">
-              <button onClick={() => setStep('mapping')} className="secondary-btn">Змінити підключення</button>
+              <button onClick={() => setStep('token')} className="secondary-btn">Назад</button>
+              {Object.keys(accountMapping).length > 0 && (
+                <button onClick={deleteIntegration} disabled={loading} className="delete-integration-btn">
+                  {loading ? 'Видалення...' : 'Видалити інтеграцію'}
+                </button>
+              )}
             </div>
           </div>
         )}
+
+
       </div>
     </div>
   )

@@ -205,6 +205,26 @@
   flex: 1;
 }
 
+.delete-integration-btn {
+  background-color: #dc3545 !important;
+  color: white !important;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.delete-integration-btn:hover:not(:disabled) {
+  background-color: #c82333 !important;
+}
+
+.delete-integration-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .import-form {
   background-color: #f8f9fa;
   padding: 20px;

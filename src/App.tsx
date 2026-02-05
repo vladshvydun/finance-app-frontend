@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
-import { io } from 'socket.io-client'
 import './App.css'
 import BankIntegration from './BankIntegration'
 import AutoRules from './AutoRules'
 import Login from './components/Login'
 import Register from './components/Register'
 import UserProfile from './components/UserProfile'
-
-export const socket = io('http://localhost:3000')
+import AddTransactionModal from '../components/AddTransactionModal'
+import DateFilter from '../components/DateFilter'
+import SearchBox from '../components/SearchBox'
+import CategoryFilter from '../components/CategoryFilter'
+import { socket } from './socket'
 
 type Transaction = {
   id: number
@@ -91,6 +93,8 @@ function App() {
   const [editingCategoryName, setEditingCategoryName] = useState<string | null>(null)
   const [categoryNewName, setCategoryNewName] = useState('')
   const [categoryParent, setCategoryParent] = useState('')
+  const [showAddTransactionModal, setShowAddTransactionModal] = useState(false)
+  const [addTransactionType, setAddTransactionType] = useState<'income'|'expense'|'transfer'>('expense')
   
   const [manageEditing, setManageEditing] = useState<string | null>(null)
   const [manageTempName, setManageTempName] = useState('')
@@ -257,16 +261,20 @@ function App() {
       setAccountsList(prev => prev.map(p => p === oldName ? newNameVal : p))
       setAccountsBalance(prev => {
         const copy = { ...prev }
-        copy[newNameVal] = (copy[newNameVal] || 0) + start
-        delete copy[oldName]
+        if (copy[oldName] !== undefined) {
+          copy[newNameVal] = copy[oldName]
+          delete copy[oldName]
+        }
         return copy
       })
     } else {
       setAllCategoriesList(prev => prev.map(p => p === oldName ? newNameVal : p))
       setCategoriesBalance(prev => {
         const copy = { ...prev }
-        copy[newNameVal] = (copy[newNameVal] || 0) + start
-        delete copy[oldName]
+        if (copy[oldName] !== undefined) {
+          copy[newNameVal] = copy[oldName]
+          delete copy[oldName]
+        }
         return copy
       })
     }
@@ -277,7 +285,7 @@ function App() {
       const res = await fetch(endpoint, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newName: newNameVal, start })
+        body: JSON.stringify({ newName: newNameVal })
       })
 
       if (!res.ok) {
@@ -428,7 +436,7 @@ function App() {
 
     try {
       const res = await fetch(`http://localhost:3000/categories/${encodeURIComponent(oldName)}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newName: fullNewName })
       })
@@ -665,10 +673,24 @@ function App() {
     let num = parseFloat(parsed)
     if (Number.isNaN(num) || num <= 0) return
     num = Math.round(num * 100) / 100
+    
+    // Створюємо повну дату з поточним часом
+    const selectedDate = new Date(date)
+    const now = new Date()
+    const dateWithTime = new Date(
+      selectedDate.getFullYear(),
+      selectedDate.getMonth(),
+      selectedDate.getDate(),
+      now.getHours(),
+      now.getMinutes(),
+      now.getSeconds(),
+      now.getMilliseconds()
+    )
+    
     await fetch('http://localhost:3000/transactions',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({amount: num, type:activeTab, category, account, date, comment})
+      body: JSON.stringify({amount: num, type:addTransactionType, category, account, date: dateWithTime.toISOString(), comment})
     })
     setAmount('')
     setDate(todayStr)
@@ -683,11 +705,24 @@ function App() {
     if (!transferFrom || !transferTo) return alert('Оберіть рахунки')
     if (transferFrom === transferTo) return alert('Оберіть різні рахунки')
 
+    // Створюємо повну дату з поточним часом
+    const selectedDate = new Date(date)
+    const now = new Date()
+    const dateWithTime = new Date(
+      selectedDate.getFullYear(),
+      selectedDate.getMonth(),
+      selectedDate.getDate(),
+      now.getHours(),
+      now.getMinutes(),
+      now.getSeconds(),
+      now.getMilliseconds()
+    )
+
     try {
       const res = await fetch('http://localhost:3000/transfer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: num, from: transferFrom, to: transferTo, date, comment })
+        body: JSON.stringify({ amount: num, from: transferFrom, to: transferTo, date: dateWithTime.toISOString(), comment })
       })
 
       if (!res.ok) {
@@ -749,6 +784,35 @@ function App() {
       if (editTransferFrom === editTransferTo) return alert('Оберіть різні рахунки')
     }
 
+    // Знаходимо оригінальну транзакцію для збереження оригінального часу
+    const originalTransaction = transactions.find(t => t.id === id)
+    let dateToSend = editDate
+
+    // Якщо дата не змінилась, зберігаємо оригінальний час
+    if (originalTransaction) {
+      const originalDate = new Date(originalTransaction.date)
+      const originalDateStr = `${originalDate.getFullYear()}-${String(originalDate.getMonth()+1).padStart(2,'0')}-${String(originalDate.getDate()).padStart(2,'0')}`
+      
+      if (originalDateStr === editDate) {
+        // Дата не змінилась - використовуємо оригінальний час
+        dateToSend = originalTransaction.date
+      } else {
+        // Дата змінилась - використовуємо поточний час
+        const selectedDate = new Date(editDate)
+        const now = new Date()
+        const dateWithTime = new Date(
+          selectedDate.getFullYear(),
+          selectedDate.getMonth(),
+          selectedDate.getDate(),
+          now.getHours(),
+          now.getMinutes(),
+          now.getSeconds(),
+          now.getMilliseconds()
+        )
+        dateToSend = dateWithTime.toISOString()
+      }
+    }
+
     // Optimistic update: keep previous state for rollback
     const prev = transactions.slice()
     // optimistic update: update current row
@@ -760,7 +824,7 @@ function App() {
         account: editType === 'transfer' ? editTransferFrom : editAccount,
         from_account: editType === 'transfer' ? editTransferFrom : t.from_account,
         to_account: editType === 'transfer' ? editTransferTo : t.to_account,
-        date: editDate,
+        date: dateToSend,
         type: editType,
         comment: editComment
       } : t
@@ -770,8 +834,8 @@ function App() {
 
     try {
       const body = editType === 'transfer'
-        ? { amount: num, category: 'Переказ', account: editTransferFrom, from_account: editTransferFrom, to_account: editTransferTo, date: editDate, type: 'transfer', comment: editComment }
-        : { amount: num, category: editCategory, account: editAccount, date: editDate, type: editType, comment: editComment }
+        ? { amount: num, category: 'Переказ', account: editTransferFrom, from_account: editTransferFrom, to_account: editTransferTo, date: dateToSend, type: 'transfer', comment: editComment }
+        : { amount: num, category: editCategory, account: editAccount, date: dateToSend, type: editType, comment: editComment }
 
       const res = await fetch(`http://localhost:3000/transactions/${id}`, {
         method: 'PATCH',
@@ -923,6 +987,18 @@ function App() {
     return sign + intStr + '.' + fracStr
   }
 
+  // Функція для розділення суми на гривні та копійки
+  const formatMoneySplit = (value: number) => {
+    const num = Math.round((Number(value) || 0) * 100) / 100
+    const sign = num < 0 ? '-' : ''
+    const abs = Math.abs(num)
+    const integerPart = Math.trunc(abs)
+    const frac = Math.round((abs - integerPart) * 100)
+    const intStr = integerPart.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0')
+    const fracStr = String(frac).padStart(2, '0')
+    return { sign, integer: intStr, fraction: fracStr }
+  }
+
   // Якщо йде перевірка авторизації
   if (isLoadingAuth) {
     return (
@@ -951,433 +1027,359 @@ function App() {
   // Основний інтерфейс для авторизованих користувачів
   return (
     <div className="app-container">
-      <div className="header">
-        <div className="header-spacer"></div>
-        <h1>Finance App</h1>
-        <UserProfile user={user} onLogout={handleLogout} />
-      </div>
-
       <div className="container">
         
         {/* Ліва колонка */}
         <div className="sidebar">
-          <div className="left-column">
+          <div className="sidebar-logo-block">
+            <div className="sidebar-logo-block-img"><img src="images/logo.png" alt="" /></div>
+            <div className="sidebar-close-panel"><img src="images/left-panel.png" alt="" /></div>
+          </div>
 
-            <div className="sidebar-block">
-              <h3>Баланс: {formatMoney(balance)} ₴</h3>
-            </div>
+          <div className="sidebar-block sidebar-block-accounts">
+              <div className="sidebar-block-header">
 
-            <div className="sidebar-block">
-               <div className="sidebar-block-header">
+                <h3>Мої рахунки</h3>
 
-                  <h3>Мої рахунки</h3>
-
-                  <div className="sidebar-block-header-edit-buttons">
-                    <button className="add-btn" onClick={() => openModal('account')} aria-label="Додати рахунок">
-                      <i className="fa-solid fa-plus"></i>
-                    </button>
-                    <button className="manage-btn" onClick={() => openManage('account')} aria-label="Керувати рахунками">
-                      <i className="fa-regular fa-pen-to-square"></i>
-                    </button>
-                    <button className="bank-btn" onClick={() => setShowBankIntegration(true)} aria-label="Інтеграція з банком">
-                      <i className="fa-solid fa-building-columns"></i>
-                    </button>
-                  </div>
-
+                <div className="sidebar-block-header-edit-buttons">
+                  <button className="add-btn" onClick={() => openModal('account')} aria-label="Додати рахунок">
+                    <i className="fa-solid fa-plus"></i>
+                  </button>
+                  <button className="manage-btn" onClick={() => openManage('account')} aria-label="Керувати рахунками">
+                    <i className="fa-regular fa-pen-to-square"></i>
+                  </button>
+                  <button className="bank-btn" onClick={() => setShowBankIntegration(true)} aria-label="Інтеграція з банком">
+                    <i className="fa-solid fa-building-columns"></i>
+                  </button>
                 </div>
 
-              <ul className="list">
-                {accounts.map(a => (
-                  <li
-                    key={a}
-                    className="list-item"
-                    onClick={() => setFilterAccounts(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a])}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <div className="list-item-left">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setFilterAccounts(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a]); }}
-                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
-                      >
-                        {a}:
-                      </button>
-                    </div>
-                    <div className="list-item-right" onClick={(e) => e.stopPropagation()}>{formatMoney(accountsBalance[a] || 0)} ₴</div>
-                  </li>
-                ))}
-              </ul>
-            </div>
+              </div>
 
-            <button 
-              className="auto-rules-sidebar-btn" 
-              onClick={() => setShowCategoriesManage(true)}
-              style={{ marginBottom: '10px', backgroundColor: '#2196f3' }}
-            >
-              <i className="fa-solid fa-list"></i> Категорії
-            </button>
+            <ul className="list">
+              {accounts.map(a => (
+                <li
+                  key={a}
+                  className="list-item"
+                  onClick={() => setFilterAccounts(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a])}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="list-item-left">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setFilterAccounts(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a]); }}
+                      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                    >
+                      {a}
+                    </button>
+                  </div>
+                  <div className="list-item-right" onClick={(e) => e.stopPropagation()}>{formatMoney(accountsBalance[a] || 0)} ₴</div>
+                </li>
+              ))}
+            </ul>
 
-            <button 
-              className="auto-rules-sidebar-btn" 
-              onClick={() => setShowAutoRules(true)}
-            >
-              <i className="fa-solid fa-wand-magic-sparkles"></i> Автоправила
-            </button>
-
+            <button className="sidebar-block-bottom-btn" onClick={() => openModal('account')} aria-label="Додати рахунок">
+            + Додати рахунок
+          </button>
+          
           </div>
+
         </div>
 
         {/* Права колонка */}
         <div className="content">
-        <div className={`tabs ${activeTab === 'expense' ? 'styleExpense' : activeTab === 'income' ? 'styleIncome' : 'styleTransfer'}`}>
-          <div className={`tabs-header ${activeTab === 'expense' ? 'styleHeaderExpense' : activeTab === 'income' ? 'styleHeaderIncome' : 'styleHeaderTransfer'}`}>
-            <button 
-              className={activeTab==='expense'?'active':'inactive'}
-              onClick={()=>setActiveTab('expense')}
-            >Витрати</button>
-            <button
-              className={activeTab==='income'?'active':'inactive'}
-              onClick={()=>setActiveTab('income')}
-            >Дохід</button>
-            <button
-              className={activeTab==='transfer'?'active':'inactive'}
-              onClick={()=>setActiveTab('transfer')}
-            >Переказ</button>
-          </div>
-
-          <div className="tabs-content">
-            {activeTab !== 'transfer' ? (
-              <>
-                <div className="tab-content-left-column">
-                  <div className="transaction-form">
-                    <div className="form-row">
-                      <label>Рахунок:</label>
-                      <select value={account} onChange={e=>setAccount(e.target.value)}>
-                        {accounts.map(a=><option key={a} value={a}>{a}</option>)}
-                      </select>
-                    </div>
-
-                    <div className="form-row">
-                      <label>Категорія:</label>
-                      <select value={category} onChange={e=>setCategory(e.target.value)}>
-                        {categoriesByType.map(c => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="form-row">
-                      <input 
-                        className="comment-input"
-                        type="text" 
-                        value={comment} 
-                        onChange={e => setComment(e.target.value)} 
-                        placeholder='Коментар'
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="tab-content-right-column">
-                  <div className="form-row-summ">
-                    <div className="form-row tabs-summ">
-                      <label>Сума:</label>
-                      <input className="summ-input" type="number" step="0.01" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)}/>
-                    </div>
-                    <div className="form-row">
-                      <label>Дата:</label>
-                      <input type="date" value={date} onChange={e => setDate(e.target.value)} />
-                    </div>
-                    <button className={`add-button ${activeTab === 'expense' ? 'add-button-expense' : 'add-button-income'}`} onClick={addTransaction}>
-                      {activeTab === 'expense' ? 'Додати витрату' : 'Додати дохід'}
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              // Transfer tab
-              <>
-                <div className="tab-content-left-column">
-                  <div className="transaction-form">
-                    <div className="form-row">
-                      <label>З рахунку:</label>
-                      <select value={transferFrom} onChange={e=>setTransferFrom(e.target.value)}>
-                        {accounts.map(a=><option key={"from-"+a} value={a}>{a}</option>)}
-                      </select>
-                    </div>
-                    <div className="form-row">
-                      <label>На рахунок:</label>
-                      <select value={transferTo} onChange={e=>setTransferTo(e.target.value)}>
-                        {accounts.map(a=><option key={"to-"+a} value={a}>{a}</option>)}
-                      </select>
-                    </div>
-                    <div className="form-row">
-                      <input 
-                        className="comment-input"
-                        type="text" 
-                        value={comment} 
-                        onChange={e => setComment(e.target.value)} 
-                        placeholder='Коментар'
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="tab-content-right-column">
-                  <div className="form-row-summ">
-                    <div className="form-row tabs-summ">
-                      <label>Сума:</label>
-                      <input className="summ-input" type="number" step="0.01" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)}/>
-                    </div>
-                    <div className="form-row">
-                      <label>Дата:</label>
-                      <input type="date" value={date} onChange={e => setDate(e.target.value)} />
-                    </div>
-                    <button className="add-button add-button-transfer" onClick={() => addTransfer()}>Додати переказ</button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-          
-        </div>
-
-        <div className="transactions">
-          <div className="date-filter-bar">
-            <div className="date-filter-dropdown">
-              <button className="date-filter-btn" onClick={() => setShowDatePicker(!showDatePicker)}>
-                {dateFilterType === 'all' && 'За весь час'}
-                {dateFilterType === 'today' && 'За сьогодні'}
-                {dateFilterType === 'yesterday' && 'За вчора'}
-                {dateFilterType === 'current_week' && 'За поточний тиждень'}
-                {dateFilterType === 'last_week' && 'За минулий тиждень'}
-                {dateFilterType === 'current_year' && 'За поточний рік'}
-                {dateFilterType === 'last_year' && 'За минулий рік'}
-                {dateFilterType === 'custom' && `${customDateFrom} - ${customDateTo}`}
-                <i className="fa-solid fa-chevron-down"></i>
-              </button>
-              
-              {showDatePicker && (
-                <div className="date-filter-menu">
-                  <button onClick={() => { setDateFilterType('all'); setShowDatePicker(false); }}>За весь час</button>
-                  <button onClick={() => { setDateFilterType('today'); setShowDatePicker(false); }}>За сьогодні</button>
-                  <button onClick={() => { setDateFilterType('yesterday'); setShowDatePicker(false); }}>За вчора</button>
-                  <button onClick={() => { setDateFilterType('current_week'); setShowDatePicker(false); }}>За поточний тиждень</button>
-                  <button onClick={() => { setDateFilterType('last_week'); setShowDatePicker(false); }}>За минулий тиждень</button>
-                  <button onClick={() => { setDateFilterType('current_year'); setShowDatePicker(false); }}>За поточний рік</button>
-                  <button onClick={() => { setDateFilterType('last_year'); setShowDatePicker(false); }}>За минулий рік</button>
-                  <div className="custom-date-range">
-                    <label>Обрати дати:</label>
-                    <input 
-                      type="date" 
-                      value={customDateFrom} 
-                      onChange={(e) => setCustomDateFrom(e.target.value)}
-                      placeholder="Від"
-                    />
-                    <input 
-                      type="date" 
-                      value={customDateTo} 
-                      onChange={(e) => setCustomDateTo(e.target.value)}
-                      placeholder="До"
-                    />
-                    <button 
-                      onClick={() => { 
-                        if (customDateFrom && customDateTo) {
-                          setDateFilterType('custom'); 
-                          setShowDatePicker(false); 
-                        }
-                      }}
-                      disabled={!customDateFrom || !customDateTo}
-                    >
-                      Застосувати
-                    </button>
-                  </div>
-                </div>
-              )}
+          <div className="content-header">
+            <div className="content-header-links">
+              <ul className="content-header-links-list">
+                <li>Платежі</li>
+                <li>Аналітика</li>
+                <li onClick={() => setShowAutoRules(true)}>Автоправила</li>
+                <li onClick={() => setShowCategoriesManage(true)}>Категорії</li>
+              </ul>
             </div>
+            <UserProfile user={user} onLogout={handleLogout} />
+          </div>  
 
-            <div className="search-box">
-              <i className="fa-solid fa-magnifying-glass"></i>
-              <input 
-                type="text" 
-                placeholder="Пошук по сумі або коментарю..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              {searchQuery && (
-                <button 
-                  className="clear-search-btn" 
-                  onClick={() => setSearchQuery('')}
-                  title="Очистити"
-                >
-                  <i className="fa-solid fa-xmark"></i>
-                </button>
-              )}
-            </div>
-
-            <div className="category-filter-dropdown">
-              <button className="category-filter-btn" onClick={() => setShowCategoryPicker(!showCategoryPicker)}>
-                <i className="fa-solid fa-filter"></i>
-                Категорії
-                {filterCategories.length > 0 && <span className="filter-badge">{filterCategories.length}</span>}
-              </button>
-              
-              {showCategoryPicker && (
-                <div className="category-filter-menu">
-                  <div className="category-filter-header">
-                    <span>Оберіть категорії</span>
-                    {filterCategories.length > 0 && (
-                      <button 
-                        className="clear-all-btn" 
-                        onClick={() => setFilterCategories([])}
-                      >
-                        Очистити
-                      </button>
-                    )}
-                  </div>
-                  {allCategories.map(category => {
-                    const isSubcategory = category.includes(':')
-                    const displayName = isSubcategory 
-                      ? category.split(':')[1].trim()
-                      : category
-                    
+          <div className="content-block content-block-balance-and-buttons">
+              <div className="content-block-balance">
+                <div className="header-label balance-label"><i className="fa-solid fa-coins"></i> Загальний баланс:</div>
+                <div className="balance-amount">
+                  {(() => {
+                    const { sign, integer, fraction } = formatMoneySplit(balance)
                     return (
-                      <label 
-                        key={category} 
-                        className="category-checkbox-item"
-                        style={isSubcategory ? { paddingLeft: '30px', fontSize: '13px' } : {}}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={filterCategories.includes(category)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setFilterCategories(prev => [...prev, category])
-                            } else {
-                              setFilterCategories(prev => prev.filter(c => c !== category))
-                            }
-                          }}
+                      <>
+                        <span className="balance-currency">₴</span>
+                        <span className="balance-integer">{integer}</span>
+                        <span className="balance-fraction">.{fraction}</span>
+                      </>
+                    )
+                  })()}
+                </div>
+              </div>
+              
+              <div className="balance-action-buttons">
+                <button className="balance-btn balance-btn-income" onClick={() => { setAddTransactionType('income'); setShowAddTransactionModal(true); }}>
+                  + Дохід
+                </button>
+                <button className="balance-btn balance-btn-expense" onClick={() => { setAddTransactionType('expense'); setShowAddTransactionModal(true); }}>
+                  - Витрати
+                </button>
+                <button className="balance-btn balance-btn-transfer" onClick={() => { setAddTransactionType('transfer'); setShowAddTransactionModal(true); }}>
+                  Переказ
+                </button>
+              </div>
+          </div>
+
+          {/* <div className={`tabs ${activeTab === 'expense' ? 'styleExpense' : activeTab === 'income' ? 'styleIncome' : 'styleTransfer'}`}>
+            <div className={`tabs-header ${activeTab === 'expense' ? 'styleHeaderExpense' : activeTab === 'income' ? 'styleHeaderIncome' : 'styleHeaderTransfer'}`}>
+              <button 
+                className={activeTab==='expense'?'active':'inactive'}
+                onClick={()=>setActiveTab('expense')}
+              >Витрати</button>
+              <button
+                className={activeTab==='income'?'active':'inactive'}
+                onClick={()=>setActiveTab('income')}
+              >Дохід</button>
+              <button
+                className={activeTab==='transfer'?'active':'inactive'}
+                onClick={()=>setActiveTab('transfer')}
+              >Переказ</button>
+            </div>
+
+            <div className="tabs-content">
+              {activeTab !== 'transfer' ? (
+                <>
+                  <div className="tab-content-left-column">
+                    <div className="transaction-form">
+                      <div className="form-row">
+                        <label>Рахунок:</label>
+                        <select value={account} onChange={e=>setAccount(e.target.value)}>
+                          {accounts.map(a=><option key={a} value={a}>{a}</option>)}
+                        </select>
+                      </div>
+
+                      <div className="form-row">
+                        <label>Категорія:</label>
+                        <select value={category} onChange={e=>setCategory(e.target.value)}>
+                          {categoriesByType.map(c => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="form-row">
+                        <input 
+                          className="comment-input"
+                          type="text" 
+                          value={comment} 
+                          onChange={e => setComment(e.target.value)} 
+                          placeholder='Коментар'
                         />
-                        <span>{displayName}</span>
-                      </label>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="tab-content-right-column">
+                    <div className="form-row-summ">
+                      <div className="form-row tabs-summ">
+                        <label>Сума:</label>
+                        <input className="summ-input" type="number" step="0.01" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)}/>
+                      </div>
+                      <div className="form-row">
+                        <label>Дата:</label>
+                        <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+                      </div>
+                      <button className={`add-button ${activeTab === 'expense' ? 'add-button-expense' : 'add-button-income'}`} onClick={addTransaction}>
+                        {activeTab === 'expense' ? 'Додати витрату' : 'Додати дохід'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                // Transfer tab
+                <>
+                  <div className="tab-content-left-column">
+                    <div className="transaction-form">
+                      <div className="form-row">
+                        <label>З рахунку:</label>
+                        <select value={transferFrom} onChange={e=>setTransferFrom(e.target.value)}>
+                          {accounts.map(a=><option key={"from-"+a} value={a}>{a}</option>)}
+                        </select>
+                      </div>
+                      <div className="form-row">
+                        <label>На рахунок:</label>
+                        <select value={transferTo} onChange={e=>setTransferTo(e.target.value)}>
+                          {accounts.map(a=><option key={"to-"+a} value={a}>{a}</option>)}
+                        </select>
+                      </div>
+                      <div className="form-row">
+                        <input 
+                          className="comment-input"
+                          type="text" 
+                          value={comment} 
+                          onChange={e => setComment(e.target.value)} 
+                          placeholder='Коментар'
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="tab-content-right-column">
+                    <div className="form-row-summ">
+                      <div className="form-row tabs-summ">
+                        <label>Сума:</label>
+                        <input className="summ-input" type="number" step="0.01" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)}/>
+                      </div>
+                      <div className="form-row">
+                        <label>Дата:</label>
+                        <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+                      </div>
+                      <button className="add-button add-button-transfer" onClick={() => addTransfer()}>Додати переказ</button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          
+          </div> */}
+
+          <div className="transactions">
+            <div className="filters">
+              <DateFilter
+                dateFilterType={dateFilterType}
+                setDateFilterType={setDateFilterType}
+                showDatePicker={showDatePicker}
+                setShowDatePicker={setShowDatePicker}
+                customDateFrom={customDateFrom}
+                setCustomDateFrom={setCustomDateFrom}
+                customDateTo={customDateTo}
+                setCustomDateTo={setCustomDateTo}
+              />
+
+              <SearchBox
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+              />
+
+              <CategoryFilter
+                showCategoryPicker={showCategoryPicker}
+                setShowCategoryPicker={setShowCategoryPicker}
+                filterCategories={filterCategories}
+                setFilterCategories={setFilterCategories}
+                allCategories={allCategories}
+              />
+            </div>
+
+            <div className="filter-bar">
+              {(filterAccounts.length || filterCategories.length) ? (
+                <>
+                  <strong>Фільтри:</strong>
+                  {filterAccounts.map(a => (
+                    <span key={"acc-"+a} className="filter-chip" onClick={() => setFilterAccounts(prev => prev.filter(x => x !== a))}>Рахунок: {a} ✖</span>
+                  ))}
+                  {filterCategories.map(c => {
+                    const displayName = c.includes(':') ? c.split(':')[1].trim() : c
+                    return (
+                      <span key={"cat-"+c} className="filter-chip" onClick={() => setFilterCategories(prev => prev.filter(x => x !== c))}>
+                        Категорія: {displayName} ✖
+                      </span>
                     )
                   })}
+                  <button className="linkish" onClick={() => { setFilterAccounts([]); setFilterCategories([]); }}>Очистити</button>
+                </>
+              ) : null}
+            </div>
+
+            <div className="transactions-table">
+              <div className="header-label transaction-label"><i className="fa-solid fa-list"></i> Список транзакцій</div>
+
+              <div className="transactions-header">
+                <div className="col checkbox-col">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedIds.size > 0 && selectedIds.size === filteredTransactions.length}
+                    onChange={toggleSelectAll}
+                    title="Виділити всі"
+                  />
+                </div>
+                <div className="col date">Дата</div>
+                <div className="col account">Рахунок</div>
+                <div className="col category">Категорія</div>
+                <div className="col comment">Коментар</div>
+                <div className="col amount">Сума</div>
+              </div>
+
+              {selectedIds.size > 0 && (
+                <div className="bulk-actions">
+                  <button 
+                    onClick={handleBulkDelete}
+                    className="delete-selected-btn"
+                  >
+                    Видалити обрані ({selectedIds.size})
+                  </button>
+                </div>
+              )}
+
+              <ul className="transactions-list">
+                {filteredTransactions.map(tr => {
+                  const isTransfer = tr.type === 'transfer'
+                  const fromAcc = tr.from_account || tr.account
+                  const toAcc = tr.to_account || ''
+
+                  return (
+                    <li
+                      key={tr.id}
+                      className={`transaction-row ${tr.type === 'income' ? 'transaction-income' : tr.type === 'expense' ? 'transaction-expense' : 'transaction-transfer'}`}
+                    >
+                      <div className="col checkbox-col" onClick={(e) => e.stopPropagation()}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedIds.has(tr.id)}
+                          onChange={() => toggleSelect(tr.id)}
+                        />
+                      </div>
+                      
+                      <div className="col date" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>
+                        <div>{new Date(tr.date).toLocaleDateString()}</div>
+                        <div className="time">{new Date(tr.date).toLocaleTimeString('uk', { hour: '2-digit', minute: '2-digit' })}</div>
+                      </div>
+
+                      {isTransfer ? (
+                        <>
+                          <div className="col account" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{fromAcc} → {toAcc}</div>
+                          <div className="col category" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>Переказ</div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="col account" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{tr.account}</div>
+                          <div className="col category" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>
+                            {tr.category.includes(':') ? tr.category.split(':')[1].trim() : tr.category}
+                          </div>
+                        </>
+                      )}
+
+                      <div className="col comment" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{tr.comment || ''}</div>
+
+                      <div 
+                        className={`col amount ${tr.type === 'income' ? 'amount-positive' : 'amount-negative'}`}
+                        onClick={() => startEdit(tr)} 
+                        style={{ cursor: 'pointer' }}
+                      >
+                        {isTransfer ? `-${formatMoney(Number(tr.amount))} ₴` : `${tr.type === 'income' ? '+' : '-'}${formatMoney(Number(tr.amount))} ₴`}
+                      </div>
+                    </li>
+                  )
+                })}
+                
+                {/* Sentinel для infinity scroll */}
+                <div id="scroll-sentinel" style={{ height: '20px', margin: '10px 0' }}>
+                  {loadingMore && <div style={{ textAlign: 'center', color: '#666' }}>Завантаження...</div>}
+                </div>
+              </ul>
+
+              {!hasMore && transactions.length > 0 && (
+                <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
+                  Всього транзакцій: {filteredTransactions.length}
                 </div>
               )}
             </div>
           </div>
-
-          <div className="filter-bar">
-            {(filterAccounts.length || filterCategories.length) ? (
-              <>
-                <strong>Фільтри:</strong>
-                {filterAccounts.map(a => (
-                  <span key={"acc-"+a} className="filter-chip" onClick={() => setFilterAccounts(prev => prev.filter(x => x !== a))}>Рахунок: {a} ✖</span>
-                ))}
-                {filterCategories.map(c => {
-                  const displayName = c.includes(':') ? c.split(':')[1].trim() : c
-                  return (
-                    <span key={"cat-"+c} className="filter-chip" onClick={() => setFilterCategories(prev => prev.filter(x => x !== c))}>
-                      Категорія: {displayName} ✖
-                    </span>
-                  )
-                })}
-                <button className="linkish" onClick={() => { setFilterAccounts([]); setFilterCategories([]); }}>Очистити</button>
-              </>
-            ) : (
-              <div className="filter-help">Клікніть на рахунок або категорію в сайдбарі або в рядку транзакції, щоб відфільтрувати</div>
-            )}
-          </div>
-
-          <h3>Останні записи</h3>
-
-          <div className="transactions-header">
-            <div className="col checkbox-col">
-              <input 
-                type="checkbox" 
-                checked={selectedIds.size > 0 && selectedIds.size === filteredTransactions.length}
-                onChange={toggleSelectAll}
-                title="Виділити всі"
-              />
-            </div>
-            <div className="col date">Дата</div>
-            <div className="col account">Рахунок</div>
-            <div className="col category">Категорія</div>
-            <div className="col comment">Коментар</div>
-            <div className="col amount">Сума</div>
-          </div>
-
-          {selectedIds.size > 0 && (
-            <div className="bulk-actions">
-              <button 
-                onClick={handleBulkDelete}
-                className="delete-selected-btn"
-              >
-                Видалити обрані ({selectedIds.size})
-              </button>
-            </div>
-          )}
-
-          <ul className="transactions-list">
-            {filteredTransactions.map(tr => {
-              const isTransfer = tr.type === 'transfer'
-              const fromAcc = tr.from_account || tr.account
-              const toAcc = tr.to_account || ''
-
-              return (
-                <li
-                  key={tr.id}
-                  className={`transaction-row ${tr.type === 'income' ? 'transaction-income' : tr.type === 'expense' ? 'transaction-expense' : 'transaction-transfer'}`}
-                >
-                  <div className="col checkbox-col" onClick={(e) => e.stopPropagation()}>
-                    <input 
-                      type="checkbox" 
-                      checked={selectedIds.has(tr.id)}
-                      onChange={() => toggleSelect(tr.id)}
-                    />
-                  </div>
-                  
-                  <div className="col date" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>
-                    <div>{new Date(tr.date).toLocaleDateString()}</div>
-                    <div className="time">{new Date(tr.date).toLocaleTimeString('uk', { hour: '2-digit', minute: '2-digit' })}</div>
-                  </div>
-
-                  {isTransfer ? (
-                    <>
-                      <div className="col account" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{fromAcc} → {toAcc}</div>
-                      <div className="col category" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>Переказ</div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="col account" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{tr.account}</div>
-                      <div className="col category" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>
-                        {tr.category.includes(':') ? tr.category.split(':')[1].trim() : tr.category}
-                      </div>
-                    </>
-                  )}
-
-                  <div className="col comment" onClick={() => startEdit(tr)} style={{ cursor: 'pointer' }}>{tr.comment || ''}</div>
-
-                  <div 
-                    className={`col amount ${tr.type === 'income' ? 'amount-positive' : 'amount-negative'}`}
-                    onClick={() => startEdit(tr)} 
-                    style={{ cursor: 'pointer' }}
-                  >
-                    {isTransfer ? `-${formatMoney(Number(tr.amount))} ₴` : `${tr.type === 'income' ? '+' : '-'}${formatMoney(Number(tr.amount))} ₴`}
-                  </div>
-                </li>
-              )
-            })}
-            
-            {/* Sentinel для infinity scroll */}
-            <div id="scroll-sentinel" style={{ height: '20px', margin: '10px 0' }}>
-              {loadingMore && <div style={{ textAlign: 'center', color: '#666' }}>Завантаження...</div>}
-            </div>
-          </ul>
-
-          {!hasMore && transactions.length > 0 && (
-            <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
-              Всього транзакцій: {filteredTransactions.length}
-            </div>
-          )}
-        </div>
         
         </div>
       </div>
@@ -1401,124 +1403,66 @@ function App() {
             </div>
           </div>
         )}
-        {showEditModal && (
-          <div className="modal-overlay" onClick={closeEditModal}>
-            <div className="edit-modal" onClick={e => e.stopPropagation()}>
-              <div className={`tabs ${editType === 'expense' ? 'styleExpense' : editType === 'income' ? 'styleIncome' : 'styleTransfer'}`}>
-                <div className={`tabs-header ${editType === 'expense' ? 'styleHeaderExpense' : editType === 'income' ? 'styleHeaderIncome' : 'styleHeaderTransfer'}`}>
-                  <button className={editType==='expense'?'active':'inactive'} onClick={()=>setEditType('expense')}>Витрати</button>
-                  <button className={editType==='income'?'active':'inactive'} onClick={()=>setEditType('income')}>Дохід</button>
-                  <button className={editType==='transfer'?'active':'inactive'} onClick={()=>setEditType('transfer')}>Переказ</button>
-                </div>
-                <div className="tabs-content">
-                  <div className="tab-content-left-column">
-                    <div className="transaction-form">
-                      {editType === 'transfer' ? (
-                        <>
-                          <div className="form-row">
-                            <label>З рахунку:</label>
-                            <select value={editTransferFrom} onChange={e=>setEditTransferFrom(e.target.value)}>
-                              {accounts.map(a=><option key={"from-"+a} value={a}>{a}</option>)}
-                            </select>
-                          </div>
-                          <div className="form-row">
-                            <label>На рахунок:</label>
-                            <select value={editTransferTo} onChange={e=>setEditTransferTo(e.target.value)}>
-                              {accounts.map(a=><option key={"to-"+a} value={a}>{a}</option>)}
-                            </select>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="form-row">
-                            <label>Рахунок:</label>
-                            <select value={editAccount} onChange={e=>setEditAccount(e.target.value)}>
-                              {accounts.map(a=><option key={a} value={a}>{a}</option>)}
-                            </select>
-                          </div>
+        <AddTransactionModal
+          isOpen={showEditModal}
+          onClose={closeEditModal}
+          transactionType={editType}
+          amount={editAmount}
+          setAmount={setEditAmount}
+          date={editDate}
+          setDate={setEditDate}
+          comment={editComment}
+          setComment={setEditComment}
+          account={editAccount}
+          setAccount={setEditAccount}
+          category={editCategory}
+          setCategory={setEditCategory}
+          transferFrom={editTransferFrom}
+          setTransferFrom={setEditTransferFrom}
+          transferTo={editTransferTo}
+          setTransferTo={setEditTransferTo}
+          accounts={accounts}
+          categories={categoriesByType}
+          onAddTransaction={() => editingId && saveEdit(editingId)}
+          onAddTransfer={() => editingId && saveEdit(editingId)}
+          isEditMode={true}
+          transactionId={editingId}
+          setType={setEditType}
+          onDelete={async () => {
+            if (!editingId) return
+            const ok = window.confirm('Підтвердити видалення транзакції?')
+            if (!ok) return
 
-                          <div className="form-row">
-                            <label>Категорія:</label>
-                            <select value={editCategory} onChange={e=>setEditCategory(e.target.value)}>
-                              {categoriesByType.map(c => (
-                                <option key={c} value={c}>{c}</option>
-                              ))}
-                            </select>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    <div className="form-row comment-row">
-                      <label>Коментар:</label>
-                      <input 
-                        type="text" 
-                        value={editComment} 
-                        onChange={e => setEditComment(e.target.value)} 
-                        placeholder="Необов'язкове поле"
-                      />
-                    </div>
-                  </div>
-                  <div className="tab-content-right-column">
-                    <div className="form-row-summ">
-                      <div className="form-row tabs-summ">
-                        <label>Сума:</label>
-                        <input className="summ-input" type="number" step="0.01" inputMode="decimal" value={editAmount} onChange={e=>setEditAmount(e.target.value)}/>
-                      </div>
-                      <div className="form-row">
-                        <label>Дата:</label>
-                        <input className="date-input" type="date" value={editDate} onChange={e => setEditDate(e.target.value)} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className='edit-modal-buttons'>
-                  <button className="edit-modal-delete-button"
-                    onClick={async () => {
-                      if (!editingId) return
-                      const ok = window.confirm('Підтвердити видалення транзакції?')
-                      if (!ok) return
+            const prev = transactions.slice()
+            setTransactions(transactions.filter(t => t.id !== editingId))
+            setDeletingId(editingId)
+            closeEditModal()
 
-                      // optimistic remove
-                      const prev = transactions.slice()
-                      setTransactions(transactions.filter(t => t.id !== editingId))
-                      setDeletingId(editingId)
-                      closeEditModal()
+            try {
+              const res = await fetch(`http://localhost:3000/transactions/${editingId}`, {
+                method: 'DELETE'
+              })
 
-                      try {
-                        const res = await fetch(`http://localhost:3000/transactions/${editingId}`, {
-                          method: 'DELETE'
-                        })
-
-                        if (!res.ok) {
-                          setTransactions(prev)
-                          const text = await res.text()
-                          const message = `Не вдалося видалити: ${text || res.status}`
-                          alert(message)
-                          setInlineErrors(prevErr => ({ ...prevErr, [editingId]: message }))
-                        }
-                      } catch (err) {
-                        setTransactions(prev)
-                        const message = 'Помилка мережі при видаленні'
-                        alert(message)
-                        setInlineErrors(prevErr => ({ ...prevErr, [editingId]: message }))
-                        console.error('Delete error', err)
-                      } finally {
-                        setDeletingId(null)
-                      }
-                    }}
-                    disabled={deletingId === editingId}
-                  >
-                    {deletingId === editingId ? '...' : 'Видалити платіж'}
-                  </button>
-                  <div className="edit-del-modal-buttons">
-                    <button className="cancel-button" onClick={closeEditModal}>Скасувати</button>
-                    <button className="add-button" onClick={() => editingId && saveEdit(editingId)}>Зберегти</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+              if (!res.ok) {
+                setTransactions(prev)
+                const text = await res.text()
+                const message = `Не вдалося видалити: ${text || res.status}`
+                alert(message)
+                setInlineErrors(prevErr => ({ ...prevErr, [editingId]: message }))
+              }
+            } catch (err) {
+              setTransactions(prev)
+              const message = 'Помилка мережі при видаленні'
+              alert(message)
+              setInlineErrors(prevErr => ({ ...prevErr, [editingId]: message }))
+              console.error('Delete error', err)
+            } finally {
+              setDeletingId(null)
+            }
+          }}
+          isSaving={savingId === editingId}
+          isDeleting={deletingId === editingId}
+        />
         {showManageModal && (
           <div className="modal-overlay" onClick={closeManage}>
             <div className="modal" onClick={e => e.stopPropagation()}>
@@ -1734,6 +1678,30 @@ function App() {
             categories={allCategoriesList}
           />
         )}
+
+        <AddTransactionModal
+          isOpen={showAddTransactionModal}
+          onClose={() => setShowAddTransactionModal(false)}
+          transactionType={addTransactionType}
+          amount={amount}
+          setAmount={setAmount}
+          date={date}
+          setDate={setDate}
+          comment={comment}
+          setComment={setComment}
+          account={account}
+          setAccount={setAccount}
+          category={category}
+          setCategory={setCategory}
+          transferFrom={transferFrom}
+          setTransferFrom={setTransferFrom}
+          transferTo={transferTo}
+          setTransferTo={setTransferTo}
+          accounts={accounts}
+          categories={categoriesByType}
+          onAddTransaction={addTransaction}
+          onAddTransfer={addTransfer}
+        />
     </div>
   )
 }
